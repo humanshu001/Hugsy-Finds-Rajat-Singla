@@ -11,86 +11,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { toast } from 'react-hot-toast'
+import axios from 'axios'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export default function ProductsPage() {
-  // Static data for products and categories
-  const staticProducts = [
-    {
-      _id: '60d21b4667d0d8992e610c85',
-      name: 'Vintage Teddy Bear',
-      description: 'Handcrafted vintage teddy bear made with premium materials.',
-      price: 29.99,
-      discountPrice: null,
-      stock: 15,
-      category: { _id: '60d21b4667d0d8992e610c01', name: 'Toys' },
-      images: ['teddy1.jpg', 'teddy2.jpg'],
-      featured: true,
-      tags: ['vintage', 'handmade', 'toys']
-    },
-    {
-      _id: '60d21b4667d0d8992e610c86',
-      name: 'Handmade Wooden Toy',
-      description: 'Eco-friendly wooden toy, perfect for imaginative play.',
-      price: 19.99,
-      discountPrice: 15.99,
-      stock: 23,
-      category: { _id: '60d21b4667d0d8992e610c01', name: 'Toys' },
-      images: ['toy1.jpg'],
-      featured: true,
-      tags: ['eco-friendly', 'wooden', 'handmade']
-    },
-    {
-      _id: '60d21b4667d0d8992e610c87',
-      name: 'Knitted Baby Blanket',
-      description: 'Soft, warm knitted blanket for babies and toddlers.',
-      price: 34.99,
-      discountPrice: null,
-      stock: 8,
-      category: { _id: '60d21b4667d0d8992e610c02', name: 'Home' },
-      images: ['blanket1.jpg', 'blanket2.jpg', 'blanket3.jpg'],
-      featured: false,
-      tags: ['knitted', 'baby', 'soft']
-    },
-    {
-      _id: '60d21b4667d0d8992e610c88',
-      name: 'Ceramic Coffee Mug',
-      description: 'Handcrafted ceramic coffee mug with unique design.',
-      price: 24.99,
-      discountPrice: null,
-      stock: 32,
-      category: { _id: '60d21b4667d0d8992e610c03', name: 'Kitchen' },
-      images: ['mug1.jpg'],
-      featured: false,
-      tags: ['ceramic', 'coffee', 'handcrafted']
-    },
-    {
-      _id: '60d21b4667d0d8992e610c89',
-      name: 'Macrame Wall Hanging',
-      description: 'Beautiful handmade macrame wall hanging for home decoration.',
-      price: 49.99,
-      discountPrice: 39.99,
-      stock: 5,
-      category: { _id: '60d21b4667d0d8992e610c02', name: 'Home' },
-      images: ['macrame1.jpg', 'macrame2.jpg'],
-      featured: true,
-      tags: ['macrame', 'wall-decor', 'handmade']
-    }
-  ];
-
-  const staticCategories = [
-    { _id: '60d21b4667d0d8992e610c01', name: 'Toys' },
-    { _id: '60d21b4667d0d8992e610c02', name: 'Home' },
-    { _id: '60d21b4667d0d8992e610c03', name: 'Kitchen' },
-    { _id: '60d21b4667d0d8992e610c04', name: 'Accessories' }
-  ];
-
-  const [products, setProducts] = useState(staticProducts)
-  const [categories, setCategories] = useState(staticCategories)
+  // State for products
+  const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [searchTerm, setSearchTerm] = useState('')
+  const [limit] = useState(10)
   
   // Modal states
   const [showAddSheet, setShowAddSheet] = useState(false)
@@ -114,24 +49,50 @@ export default function ProductsPage() {
   const [productImages, setProductImages] = useState([])
   const [imagePreviewUrls, setImagePreviewUrls] = useState([])
   
-  // Handle search
+  // Fetch products from API
+  const fetchProducts = async () => {
+    setLoading(true)
+    try {
+      let url = `${API_URL}/products?page=${currentPage}&limit=${limit}`
+      
+      // Add search term if present
+      if (searchTerm.trim() !== '') {
+        url += `&search=${searchTerm}`
+      }
+      
+      const response = await axios.get(url)
+      setProducts(response.data.products || response.data)
+      setTotalPages(response.data.totalPages || 1)
+      setError(null)
+    } catch (err) {
+      setError('Failed to fetch products. Please try again later.')
+      console.error('Error fetching products:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  // Fetch categories for product form
+  const fetchCategories = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/categories`)
+      setCategories(response.data.categories || response.data)
+    } catch (err) {
+      console.error('Error fetching categories:', err)
+    }
+  }
+  
+  // Initial data fetch
+  useEffect(() => {
+    fetchProducts()
+    fetchCategories()
+  }, [currentPage])
+  
+  // Handle search with API
   const handleSearch = (e) => {
     e.preventDefault()
-    
-    if (searchTerm.trim() === '') {
-      setProducts(staticProducts)
-      return
-    }
-    
-    // Filter products based on search term
-    const filtered = staticProducts.filter(product => 
-      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.description.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-    
-    setProducts(filtered)
     setCurrentPage(1)
-    setTotalPages(1)
+    fetchProducts()
   }
   
   // Handle pagination
@@ -211,9 +172,10 @@ export default function ProductsPage() {
     
     // If product has images, set them as previews
     if (product.images && product.images.length > 0) {
-      const images = Array.isArray(product.images) ? product.images : product.images.split(',')
-      // Mock image URLs for demo
-      const previews = images.map(img => `https://placehold.co/200x200?text=${img}`)
+      // For real API, use actual image URLs
+      const previews = product.images.map(img => 
+        img.startsWith('http') ? img : `${API_URL}/uploads/${img}`
+      )
       setImagePreviewUrls(previews)
     }
     
@@ -226,76 +188,118 @@ export default function ProductsPage() {
     setShowDeleteDialog(true)
   }
   
-  // Handle add product
-  const handleAddProduct = (e) => {
+  // Handle add product with API
+  const handleAddProduct = async (e) => {
     e.preventDefault()
     
-    // Create new product with mock data
-    const newProduct = {
-      _id: `new-${Date.now()}`,
-      name: formData.name,
-      description: formData.description,
-      price: parseFloat(formData.price),
-      discountPrice: formData.discountPrice ? parseFloat(formData.discountPrice) : null,
-      stock: parseInt(formData.stock),
-      category: categories.find(cat => cat._id === formData.category),
-      featured: formData.featured,
-      tags: formData.tags.split(',').map(tag => tag.trim()),
-      images: productImages.map((_, index) => `new-image-${index}.jpg`)
-    }
-    
-    setProducts([newProduct, ...products])
-    setShowAddSheet(false)
-    
-    // Show success message
-    alert('Product added successfully!')
-  }
-  
-  // Handle edit product
-  const handleEditProduct = (e) => {
-    e.preventDefault()
-    
-    // Find the product to update
-    const updatedProducts = products.map(product => {
-      if (product._id === formData.id) {
-        return {
-          ...product,
-          name: formData.name,
-          description: formData.description,
-          price: parseFloat(formData.price),
-          discountPrice: formData.discountPrice ? parseFloat(formData.discountPrice) : null,
-          stock: parseInt(formData.stock),
-          category: categories.find(cat => cat._id === formData.category),
-          featured: formData.featured,
-          tags: formData.tags.split(',').map(tag => tag.trim()),
-          // Keep existing images if no new ones are uploaded
-          images: productImages.length > 0 
-            ? productImages.map((_, index) => `updated-image-${index}.jpg`) 
-            : product.images
-        }
+    try {
+      // Create form data for file upload
+      const formDataToSend = new FormData()
+      formDataToSend.append('name', formData.name)
+      formDataToSend.append('description', formData.description)
+      formDataToSend.append('price', formData.price)
+      
+      if (formData.discountPrice) {
+        formDataToSend.append('discountPrice', formData.discountPrice)
       }
-      return product
-    })
-    
-    setProducts(updatedProducts)
-    setShowEditSheet(false)
-    
-    // Show success message
-    alert('Product updated successfully!')
+      
+      formDataToSend.append('stock', formData.stock)
+      formDataToSend.append('category', formData.category)
+      formDataToSend.append('featured', formData.featured)
+      
+      if (formData.tags) {
+        const tagsArray = formData.tags.split(',').map(tag => tag.trim())
+        formDataToSend.append('tags', JSON.stringify(tagsArray))
+      }
+      
+      // Append each image file
+      productImages.forEach(image => {
+        formDataToSend.append('productImages', image)
+      })
+      
+      const response = await axios.post(`${API_URL}/products`, formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      
+      // Refresh products list
+      fetchProducts()
+      
+      setShowAddSheet(false)
+      toast.success('Product added successfully!')
+    } catch (err) {
+      console.error('Error adding product:', err)
+      toast.error(err.response?.data?.message || 'Failed to add product')
+    }
   }
   
-  // Handle delete product
-  const handleDeleteProduct = () => {
+  // Handle edit product with API
+  const handleEditProduct = async (e) => {
+    e.preventDefault()
+    
+    try {
+      // Create form data for file upload
+      const formDataToSend = new FormData()
+      formDataToSend.append('name', formData.name)
+      formDataToSend.append('description', formData.description)
+      formDataToSend.append('price', formData.price)
+      
+      if (formData.discountPrice) {
+        formDataToSend.append('discountPrice', formData.discountPrice)
+      } else {
+        formDataToSend.append('discountPrice', null)
+      }
+      
+      formDataToSend.append('stock', formData.stock)
+      formDataToSend.append('category', formData.category)
+      formDataToSend.append('featured', formData.featured)
+      
+      if (formData.tags) {
+        const tagsArray = formData.tags.split(',').map(tag => tag.trim())
+        formDataToSend.append('tags', JSON.stringify(tagsArray))
+      }
+      
+      // Only append images if new ones were selected
+      if (productImages.length > 0) {
+        productImages.forEach(image => {
+          formDataToSend.append('productImages', image)
+        })
+      }
+      
+      const response = await axios.put(`${API_URL}/products/${formData.id}`, formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      
+      // Refresh products list
+      fetchProducts()
+      
+      setShowEditSheet(false)
+      toast.success('Product updated successfully!')
+    } catch (err) {
+      console.error('Error updating product:', err)
+      toast.error(err.response?.data?.message || 'Failed to update product')
+    }
+  }
+  
+  // Handle delete product with API
+  const handleDeleteProduct = async () => {
     if (!selectedProduct) return
     
-    // Filter out the deleted product
-    const updatedProducts = products.filter(product => product._id !== selectedProduct._id)
-    
-    setProducts(updatedProducts)
-    setShowDeleteDialog(false)
-    
-    // Show success message
-    alert('Product deleted successfully!')
+    try {
+      await axios.delete(`${API_URL}/products/${selectedProduct._id}`)
+      
+      // Refresh products list
+      fetchProducts()
+      
+      setShowDeleteDialog(false)
+      toast.success('Product deleted successfully!')
+    } catch (err) {
+      console.error('Error deleting product:', err)
+      toast.error(err.response?.data?.message || 'Failed to delete product')
+    }
   }
   
   return (
@@ -354,14 +358,22 @@ export default function ProductsPage() {
                       <TableCell className="font-medium">{product._id.substring(0, 8)}...</TableCell>
                       <TableCell>
                         {product.images && product.images.length > 0 ? (
-                          <img 
-                            src={`https://placehold.co/200x200?text=${product.images[0]}`}
-                            alt={product.name}
-                            className="h-10 w-10 rounded-md object-cover"
-                          />
+                          <div className="h-12 w-12 overflow-hidden rounded-md">
+                            <img 
+                              src={product.images[0].startsWith('http') 
+                                ? product.images[0] 
+                                : `${API_URL}/uploads/${product.images[0]}`} 
+                              alt={product.name} 
+                              className="h-full w-full object-cover"
+                              onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.src = `https://placehold.co/100x100?text=Image`;
+                              }}
+                            />
+                          </div>
                         ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-gray-100">
-                            <Image size={16} className="text-gray-400" />
+                          <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gray-100">
+                            <Image size={18} className="text-gray-400" />
                           </div>
                         )}
                       </TableCell>
@@ -401,8 +413,11 @@ export default function ProductsPage() {
           </div>
           
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-center space-x-2">
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-sm text-gray-500">
+              Showing {products.length} products
+            </div>
+            <div className="flex items-center space-x-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -423,7 +438,7 @@ export default function ProductsPage() {
                 <ChevronRight size={16} />
               </Button>
             </div>
-          )}
+          </div>
         </>
       )}
       
@@ -459,12 +474,11 @@ export default function ProductsPage() {
               <textarea
                 id="description"
                 name="description"
-                rows={3}
-                required
+                rows="4"
                 value={formData.description}
                 onChange={handleInputChange}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
-              />
+              ></textarea>
             </div>
             
             <div className="grid grid-cols-2 gap-4">
@@ -499,40 +513,41 @@ export default function ProductsPage() {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label htmlFor="stock" className="text-sm font-medium">
-                  Stock
-                </label>
-                <input
-                  id="stock"
-                  name="stock"
-                  type="number"
-                  required
-                  value={formData.stock}
-                  onChange={handleInputChange}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
-                />
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="category" className="text-sm font-medium">
-                  Category
-                </label>
-                <select
-                  id="category"
-                  name="category"
-                  required
-                  value={formData.category}
-                  onChange={handleInputChange}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
-                >
-                  {categories.map((category) => (
-                    <option key={category._id} value={category._id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="space-y-2">
+              <label htmlFor="stock" className="text-sm font-medium">
+                Stock Quantity
+              </label>
+              <input
+                id="stock"
+                name="stock"
+                type="number"
+                required
+                value={formData.stock}
+                onChange={handleInputChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="category" className="text-sm font-medium">
+                Category
+              </label>
+              <select
+                id="category"
+                name="category"
+                required
+                value={formData.category}
+                onChange={handleInputChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              >
+                {categories.length === 0 && (
+                  <option value="">Loading categories...</option>
+                )}
+                {categories.map((category) => (
+                  <option key={category._id} value={category._id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
             </div>
             
             <div className="space-y-2">
@@ -545,25 +560,23 @@ export default function ProductsPage() {
                 type="text"
                 value={formData.tags}
                 onChange={handleInputChange}
-                placeholder="e.g. new, sale, featured"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+                placeholder="vintage, handmade, etc."
               />
             </div>
             
-            <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <input
-                  id="featured"
-                  name="featured"
-                  type="checkbox"
-                  checked={formData.featured}
-                  onChange={handleInputChange}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <label htmlFor="featured" className="text-sm font-medium">
-                  Featured Product
-                </label>
-              </div>
+            <div className="flex items-center space-x-2">
+              <input
+                id="featured"
+                name="featured"
+                type="checkbox"
+                checked={formData.featured}
+                onChange={handleInputChange}
+                className="h-4 w-4 rounded border-gray-300 text-5 focus:ring-5"
+              />
+              <label htmlFor="featured" className="text-sm font-medium">
+                Featured Product
+              </label>
             </div>
             
             <div className="space-y-2">
@@ -592,7 +605,10 @@ export default function ProductsPage() {
               )}
             </div>
             
-            <SheetFooter className="pt-4">
+            <SheetFooter>
+              <Button type="button" variant="outline" onClick={() => setShowAddSheet(false)}>
+                Cancel
+              </Button>
               <Button type="submit">Add Product</Button>
             </SheetFooter>
           </form>
@@ -740,21 +756,6 @@ export default function ProductsPage() {
             </div>
             
             <div className="space-y-2">
-              <label className="text-sm font-medium">Current Images</label>
-              {imagePreviewUrls.length > 0 ? (
-                <div className="mt-2 grid grid-cols-5 gap-2">
-                  {imagePreviewUrls.map((url, index) => (
-                    <div key={index} className="relative h-20 w-20 overflow-hidden rounded-md">
-                      <img src={url} alt={`Current ${index + 1}`} className="h-full w-full object-cover" />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">No images available</p>
-              )}
-            </div>
-            
-            <div className="space-y-2">
               <label htmlFor="edit-images" className="text-sm font-medium">
                 Replace Images (Max 5)
               </label>
@@ -771,11 +772,27 @@ export default function ProductsPage() {
                 Leave empty to keep current images. Uploading new images will replace all existing ones.
               </p>
               
+              {/* Current Images */}
+              {imagePreviewUrls.length > 0 && (
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  {imagePreviewUrls.map((url, index) => (
+                    <div key={index} className="relative h-20 w-20 overflow-hidden rounded-md">
+                      <img 
+                        src={url} 
+                        alt={`Current ${index + 1}`} 
+                        className="h-full w-full object-cover" 
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              
               {/* New Image Previews */}
               {productImages.length > 0 && (
                 <div className="mt-2 flex gap-2 flex-wrap">
+                  <p className="w-full text-sm font-medium">New Images:</p>
                   {productImages.map((file, index) => (
-                    <div key={index} className="relative h-20 w-20 overflow-hidden rounded-md">
+                    <div key={`new-${index}`} className="relative h-20 w-20 overflow-hidden rounded-md">
                       <img 
                         src={URL.createObjectURL(file)} 
                         alt={`New ${index + 1}`} 
@@ -788,28 +805,24 @@ export default function ProductsPage() {
             </div>
             
             <SheetFooter className="pt-4">
+              <Button type="button" variant="outline" onClick={() => setShowEditSheet(false)}>
+                Cancel
+              </Button>
               <Button type="submit">Update Product</Button>
             </SheetFooter>
           </form>
         </SheetContent>
       </Sheet>
       
-      {/* Delete Product Dialog */}
+      {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Product</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this product? This action cannot be undone.
+              Are you sure you want to delete "{selectedProduct?.name}"? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            {selectedProduct && (
-              <p>
-                You are about to delete <strong>{selectedProduct.name}</strong>.
-              </p>
-            )}
-          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
               Cancel
@@ -823,3 +836,10 @@ export default function ProductsPage() {
     </div>
   )
 }
+
+
+
+
+
+
+

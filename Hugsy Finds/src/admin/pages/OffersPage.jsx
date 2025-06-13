@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Search, Plus, Edit, Trash2, Calendar, ChevronLeft, ChevronRight, Tag, Percent, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
@@ -28,103 +28,45 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { toast } from 'react-hot-toast'
+import axios from 'axios'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export default function OffersPage() {
-  // Static data for offers
-  const staticOffers = [
-    { 
-      id: 1, 
-      title: "Summer Sale", 
-      description: "Get amazing discounts on our summer collection",
-      discount: "30% OFF",
-      discountType: "percentage",
-      discountValue: 30,
-      startDate: "2024-06-01T00:00:00",
-      endDate: "2024-08-31T23:59:59",
-      isActive: true,
-      bgColor: "bg-1",
-      textColor: "text-black",
-      buttonColor: "bg-5",
-      offerType: "seasonal"
-    },
-    { 
-      id: 2, 
-      title: "Bundle & Save", 
-      description: "Purchase any two items and get the third one free",
-      discount: "Buy 2 Get 1 Free",
-      discountType: "bundle",
-      discountValue: 0,
-      startDate: "2024-01-01T00:00:00",
-      endDate: null,
-      isActive: true,
-      bgColor: "bg-2",
-      textColor: "text-black",
-      buttonColor: "bg-5",
-      offerType: "bundle"
-    },
-    { 
-      id: 3, 
-      title: "New Customer Special", 
-      description: "Special discount for first-time customers",
-      discount: "15% OFF",
-      discountType: "percentage",
-      discountValue: 15,
-      startDate: "2024-01-01T00:00:00",
-      endDate: null,
-      isActive: true,
-      bgColor: "bg-4",
-      textColor: "text-black",
-      buttonColor: "bg-5",
-      offerType: "special"
-    },
-    { 
-      id: 4, 
-      title: "Flash Sale", 
-      description: "24 Hours Only! Don't miss our exclusive flash sale with discounts up to 50% off on selected items.",
-      discount: "Up to 50% OFF",
-      discountType: "percentage",
-      discountValue: 50,
-      startDate: "2024-07-15T00:00:00",
-      endDate: "2024-07-16T00:00:00",
-      isActive: false,
-      bgColor: "bg-2",
-      textColor: "text-black",
-      buttonColor: "bg-5",
-      offerType: "flash"
-    },
-    { 
-      id: 5, 
-      title: "Loyalty Program", 
-      description: "Join our loyalty program and earn points on every purchase. Redeem your points for discounts, free products, or exclusive offers!",
-      discount: "Points Program",
-      discountType: "loyalty",
-      discountValue: 0,
-      startDate: "2024-01-01T00:00:00",
-      endDate: null,
-      isActive: true,
-      bgColor: "bg-4",
-      textColor: "text-black",
-      buttonColor: "bg-5",
-      offerType: "loyalty"
-    }
-  ];
-
-  const [offers, setOffers] = useState(staticOffers)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [typeFilter, setTypeFilter] = useState('all')
+  // State for offers
+  const [offers, setOffers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [stats, setStats] = useState({
+    totalOffers: 0,
+    activeOffers: 0,
+    upcomingOffers: 0,
+    expiredOffers: 0,
+    offerTypeCounts: {}
+  });
+  
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [limit] = useState(10);
+  
+  // Filters
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
   
   // Sheet and dialog states
-  const [showAddSheet, setShowAddSheet] = useState(false)
-  const [showEditSheet, setShowEditSheet] = useState(false)
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [showPreviewDialog, setShowPreviewDialog] = useState(false)
-  const [selectedOffer, setSelectedOffer] = useState(null)
-  const [previewData, setPreviewData] = useState(null)
+  const [showAddSheet, setShowAddSheet] = useState(false);
+  const [showEditSheet, setShowEditSheet] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showPreviewDialog, setShowPreviewDialog] = useState(false);
+  const [selectedOffer, setSelectedOffer] = useState(null);
+  const [previewData, setPreviewData] = useState(null);
+  
+  // Products and categories for selection
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   
   // Form data
   const [formData, setFormData] = useState({
@@ -139,108 +81,150 @@ export default function OffersPage() {
     bgColor: 'bg-1',
     textColor: 'text-black',
     buttonColor: 'bg-5',
-    offerType: 'seasonal'
-  })
+    offerType: 'seasonal',
+    applicableProducts: [],
+    applicableCategories: [],
+    couponCode: '',
+    showOnHomepage: true,
+    displayOrder: 0
+  });
+  
+  // Fetch offers from API
+  const fetchOffers = async () => {
+    setLoading(true);
+    try {
+      let url = `${API_URL}/offers?page=${currentPage}&limit=${limit}`;
+      
+      // Add filters if set
+      if (statusFilter !== 'all') {
+        url += `&isActive=${statusFilter === 'active'}`;
+      }
+      
+      if (typeFilter !== 'all') {
+        url += `&offerType=${typeFilter}`;
+      }
+      
+      const response = await axios.get(url);
+      setOffers(response.data.offers);
+      setTotalPages(response.data.totalPages);
+      setError(null);
+    } catch (err) {
+      setError('Failed to fetch offers. Please try again later.');
+      console.error('Error fetching offers:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Fetch offer stats
+  const fetchOfferStats = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/offers/stats/summary`);
+      setStats(response.data);
+    } catch (err) {
+      console.error('Error fetching offer stats:', err);
+    }
+  };
+  
+  // Fetch products and categories for selection
+  const fetchProductsAndCategories = async () => {
+    try {
+      const [productsRes, categoriesRes] = await Promise.all([
+        axios.get(`${API_URL}/products`),
+        axios.get(`${API_URL}/categories`)
+      ]);
+      
+      setProducts(productsRes.data.products || productsRes.data);
+      setCategories(categoriesRes.data.categories || categoriesRes.data);
+    } catch (err) {
+      console.error('Error fetching products and categories:', err);
+    }
+  };
+  
+  // Load data on component mount and when filters change
+  useEffect(() => {
+    fetchOffers();
+    fetchOfferStats();
+  }, [currentPage, statusFilter, typeFilter]);
   
   // Format date for display
   const formatDate = (dateString) => {
-    if (!dateString) return 'No expiration'
+    if (!dateString) return 'No expiration';
     
-    const date = new Date(dateString)
-    return date.toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'short', 
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
       day: 'numeric'
-    })
-  }
-  
-  // Handle pagination
-  const handlePrevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1)
-    }
-  }
-  
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1)
-    }
-  }
+    });
+  };
   
   // Handle search
   const handleSearch = (e) => {
-    e.preventDefault()
+    e.preventDefault();
     
     if (searchTerm.trim() === '') {
-      filterOffers(statusFilter, typeFilter)
-      return
+      fetchOffers();
+      return;
     }
     
     // Filter offers based on search term
-    let filtered = staticOffers.filter(offer => 
+    const filtered = offers.filter(offer => 
       offer.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       offer.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       offer.discount.toLowerCase().includes(searchTerm.toLowerCase())
-    )
+    );
     
-    // Apply status filter if needed
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(offer => 
-        statusFilter === 'active' ? offer.isActive : !offer.isActive
-      )
-    }
-    
-    // Apply type filter if needed
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(offer => offer.offerType === typeFilter)
-    }
-    
-    setOffers(filtered)
-    setCurrentPage(1)
-  }
+    setOffers(filtered);
+  };
   
   // Handle status filter change
   const filterOffers = (status, type) => {
-    setStatusFilter(status)
-    setTypeFilter(type)
-    
-    let filtered = staticOffers
-    
-    // Apply status filter
-    if (status !== 'all') {
-      filtered = filtered.filter(offer => 
-        status === 'active' ? offer.isActive : !offer.isActive
-      )
-    }
-    
-    // Apply type filter
-    if (type !== 'all') {
-      filtered = filtered.filter(offer => offer.offerType === type)
-    }
-    
-    setOffers(filtered)
-    setCurrentPage(1)
-  }
+    setStatusFilter(status);
+    setTypeFilter(type);
+    setCurrentPage(1);
+  };
   
   // Handle input change
   const handleInputChange = (e) => {
-    const { name, value } = e.target
+    const { name, value } = e.target;
     setFormData({
       ...formData,
       [name]: value
-    })
-  }
+    });
+  };
   
   // Handle select change
   const handleSelectChange = (name, value) => {
     setFormData({
       ...formData,
       [name]: value
-    })
-  }
+    });
+  };
+  
+  // Handle multi-select change
+  const handleMultiSelectChange = (name, value) => {
+    // If value is already in array, remove it, otherwise add it
+    const currentValues = formData[name];
+    let newValues;
+    
+    if (currentValues.includes(value)) {
+      newValues = currentValues.filter(v => v !== value);
+    } else {
+      newValues = [...currentValues, value];
+    }
+    
+    setFormData({
+      ...formData,
+      [name]: newValues
+    });
+  };
   
   // Open add offer sheet
   const openAddOfferSheet = () => {
+    // Fetch products and categories for selection
+    fetchProductsAndCategories();
+    
     // Reset form data
     setFormData({
       title: '',
@@ -254,14 +238,23 @@ export default function OffersPage() {
       bgColor: 'bg-1',
       textColor: 'text-black',
       buttonColor: 'bg-5',
-      offerType: 'seasonal'
-    })
-    setShowAddSheet(true)
-  }
+      offerType: 'seasonal',
+      applicableProducts: [],
+      applicableCategories: [],
+      couponCode: '',
+      showOnHomepage: true,
+      displayOrder: 0
+    });
+    
+    setShowAddSheet(true);
+  };
   
   // Open edit offer sheet
   const openEditOfferSheet = (offer) => {
-    setSelectedOffer(offer)
+    // Fetch products and categories for selection
+    fetchProductsAndCategories();
+    
+    setSelectedOffer(offer);
     setFormData({
       title: offer.title,
       description: offer.description,
@@ -274,107 +267,100 @@ export default function OffersPage() {
       bgColor: offer.bgColor,
       textColor: offer.textColor,
       buttonColor: offer.buttonColor,
-      offerType: offer.offerType
-    })
-    setShowEditSheet(true)
-  }
+      offerType: offer.offerType,
+      applicableProducts: offer.applicableProducts.map(p => typeof p === 'object' ? p._id : p),
+      applicableCategories: offer.applicableCategories.map(c => typeof c === 'object' ? c._id : c),
+      couponCode: offer.couponCode || '',
+      showOnHomepage: offer.showOnHomepage !== undefined ? offer.showOnHomepage : true,
+      displayOrder: offer.displayOrder || 0
+    });
+    
+    setShowEditSheet(true);
+  };
   
   // Open delete offer dialog
   const openDeleteDialog = (offer) => {
-    setSelectedOffer(offer)
-    setShowDeleteDialog(true)
-  }
+    setSelectedOffer(offer);
+    setShowDeleteDialog(true);
+  };
   
   // Handle add offer
-  const handleAddOffer = (e) => {
-    e.preventDefault()
+  const handleAddOffer = async (e) => {
+    e.preventDefault();
     
-    // Create new offer
-    const newOffer = {
-      id: Date.now(),
-      title: formData.title,
-      description: formData.description,
-      discount: formData.discount,
-      discountType: formData.discountType,
-      discountValue: parseFloat(formData.discountValue),
-      startDate: formData.startDate ? new Date(formData.startDate).toISOString() : new Date().toISOString(),
-      endDate: formData.endDate ? new Date(formData.endDate).toISOString() : null,
-      isActive: formData.isActive,
-      bgColor: formData.bgColor,
-      textColor: formData.textColor,
-      buttonColor: formData.buttonColor,
-      offerType: formData.offerType
+    try {
+      const response = await axios.post(`${API_URL}/offers`, formData);
+      
+      // Refresh offers list
+      fetchOffers();
+      fetchOfferStats();
+      
+      setShowAddSheet(false);
+      toast.success('Offer added successfully!');
+    } catch (err) {
+      console.error('Error adding offer:', err);
+      toast.error(err.response?.data?.message || 'Failed to add offer');
     }
-    
-    setOffers([newOffer, ...offers])
-    setShowAddSheet(false)
-    
-    // Show success message
-    alert('Offer added successfully!')
-  }
+  };
   
   // Handle edit offer
-  const handleEditOffer = (e) => {
-    e.preventDefault()
+  const handleEditOffer = async (e) => {
+    e.preventDefault();
     
-    if (!selectedOffer) return
+    if (!selectedOffer) return;
     
-    // Update offer
-    const updatedOffers = offers.map(offer => {
-      if (offer.id === selectedOffer.id) {
-        return {
-          ...offer,
-          title: formData.title,
-          description: formData.description,
-          discount: formData.discount,
-          discountType: formData.discountType,
-          discountValue: parseFloat(formData.discountValue),
-          startDate: formData.startDate ? new Date(formData.startDate).toISOString() : offer.startDate,
-          endDate: formData.endDate ? new Date(formData.endDate).toISOString() : null,
-          isActive: formData.isActive,
-          bgColor: formData.bgColor,
-          textColor: formData.textColor,
-          buttonColor: formData.buttonColor,
-          offerType: formData.offerType
-        }
-      }
-      return offer
-    })
-    
-    setOffers(updatedOffers)
-    setShowEditSheet(false)
-    
-    // Show success message
-    alert('Offer updated successfully!')
-  }
+    try {
+      const response = await axios.put(`${API_URL}/offers/${selectedOffer._id}`, formData);
+      
+      // Refresh offers list
+      fetchOffers();
+      fetchOfferStats();
+      
+      setShowEditSheet(false);
+      toast.success('Offer updated successfully!');
+    } catch (err) {
+      console.error('Error updating offer:', err);
+      toast.error(err.response?.data?.message || 'Failed to update offer');
+    }
+  };
   
   // Handle delete offer
-  const handleDeleteOffer = () => {
-    if (!selectedOffer) return
+  const handleDeleteOffer = async () => {
+    if (!selectedOffer) return;
     
-    // Filter out the deleted offer
-    const updatedOffers = offers.filter(offer => offer.id !== selectedOffer.id)
-    
-    setOffers(updatedOffers)
-    setShowDeleteDialog(false)
-    
-    // Show success message
-    alert('Offer deleted successfully!')
-  }
+    try {
+      await axios.delete(`${API_URL}/offers/${selectedOffer._id}`);
+      
+      // Refresh offers list
+      fetchOffers();
+      fetchOfferStats();
+      
+      setShowDeleteDialog(false);
+      toast.success('Offer deleted successfully!');
+    } catch (err) {
+      console.error('Error deleting offer:', err);
+      toast.error(err.response?.data?.message || 'Failed to delete offer');
+    }
+  };
   
   // Toggle offer status
-  const toggleOfferStatus = (offerId) => {
-    const updatedOffers = offers.map(offer => {
-      if (offer.id === offerId) {
-        return { ...offer, isActive: !offer.isActive }
-      }
-      return offer
-    })
-    
-    setOffers(updatedOffers)
-  }
+  const toggleOfferStatus = async (offerId) => {
+    try {
+      await axios.patch(`${API_URL}/offers/${offerId}/toggle`);
+      
+      // Refresh offers list
+      fetchOffers();
+      fetchOfferStats();
+      
+      toast.success('Offer status updated successfully!');
+    } catch (err) {
+      console.error('Error toggling offer status:', err);
+      toast.error(err.response?.data?.message || 'Failed to update offer status');
+    }
+  };
 
-   const previewOffer = (isNew = false) => {
+  // Preview offer
+  const previewOffer = (isNew = false) => {
     // Create preview data from current form
     const preview = {
       title: formData.title,
@@ -389,11 +375,11 @@ export default function OffersPage() {
       textColor: formData.textColor,
       buttonColor: formData.buttonColor,
       offerType: formData.offerType
-    }
+    };
     
-    setPreviewData(preview)
-    setShowPreviewDialog(true)
-  }
+    setPreviewData(preview);
+    setShowPreviewDialog(true);
+  };
   
   return (
     <div>
@@ -433,10 +419,11 @@ export default function OffersPage() {
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="seasonal">Seasonal</SelectItem>
-                <SelectItem value="bundle">Bundle</SelectItem>
-                <SelectItem value="special">Special</SelectItem>
                 <SelectItem value="flash">Flash</SelectItem>
-                <SelectItem value="loyalty">Loyalty</SelectItem>
+                <SelectItem value="bundle">Bundle</SelectItem>
+                <SelectItem value="clearance">Clearance</SelectItem>
+                <SelectItem value="holiday">Holiday</SelectItem>
+                <SelectItem value="promotion">Promotion</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -473,7 +460,7 @@ export default function OffersPage() {
               <TableBody>
                 {offers.length > 0 ? (
                   offers.map((offer) => (
-                    <TableRow key={offer.id}>
+                    <TableRow key={offer._id}>
                       <TableCell className="font-medium">
                         {offer.title}
                         <div className="text-xs text-gray-500 truncate max-w-xs">
@@ -486,7 +473,7 @@ export default function OffersPage() {
                           {offer.discountType === 'percentage' ? 'Percentage' : 
                            offer.discountType === 'fixed' ? 'Fixed Amount' : 
                            offer.discountType === 'bundle' ? 'Bundle Deal' : 
-                           offer.discountType === 'loyalty' ? 'Loyalty Program' : 
+                           offer.discountType === 'bogo' ? 'Buy One Get One' : 
                            'Special Offer'}
                         </div>
                       </TableCell>
@@ -494,8 +481,9 @@ export default function OffersPage() {
                         <Badge className={
                           offer.offerType === 'seasonal' ? 'bg-blue-100 text-blue-800' :
                           offer.offerType === 'bundle' ? 'bg-purple-100 text-purple-800' :
-                          offer.offerType === 'special' ? 'bg-green-100 text-green-800' :
                           offer.offerType === 'flash' ? 'bg-red-100 text-red-800' :
+                          offer.offerType === 'clearance' ? 'bg-orange-100 text-orange-800' :
+                          offer.offerType === 'holiday' ? 'bg-green-100 text-green-800' :
                           'bg-amber-100 text-amber-800'
                         }>
                           {offer.offerType.charAt(0).toUpperCase() + offer.offerType.slice(1)}
@@ -513,7 +501,7 @@ export default function OffersPage() {
                         <div className="flex items-center space-x-2">
                           <Switch
                             checked={offer.isActive}
-                            onCheckedChange={() => toggleOfferStatus(offer.id)}
+                            onCheckedChange={() => toggleOfferStatus(offer._id)}
                           />
                           <span className={offer.isActive ? 'text-green-600' : 'text-gray-500'}>
                             {offer.isActive ? 'Active' : 'Inactive'}
@@ -565,28 +553,28 @@ export default function OffersPage() {
           
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="mt-6 flex items-center justify-between">
-              <div className="text-sm text-gray-500">
-                Showing page {currentPage} of {totalPages}
-              </div>
-              <div className="flex space-x-2">
-                <Button
-                                    variant="outline"
-                  size="sm"
-                  onClick={handlePrevPage}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft size={18} />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleNextPage}
-                  disabled={currentPage === totalPages}
-                >
-                  <ChevronRight size={18} />
-                </Button>
-              </div>
+            <div className="mt-4 flex items-center justify-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft size={16} />
+              </Button>
+              
+              <span className="text-sm">
+                Page {currentPage} of {totalPages}
+              </span>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+              >
+                <ChevronRight size={16} />
+              </Button>
             </div>
           )}
           
@@ -597,8 +585,9 @@ export default function OffersPage() {
                 <CardTitle className="text-sm font-medium">Total Offers</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{staticOffers.length}</div>
-                <p className="text-xs text-gray-500">All offers</p>
+                <div className="text-2xl font-bold">
+                  {stats.totalOffers}
+                </div>
               </CardContent>
             </Card>
             
@@ -608,10 +597,10 @@ export default function OffersPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {staticOffers.filter(offer => offer.isActive).length}
+                  {stats.activeOffers}
                 </div>
                 <p className="text-xs text-gray-500">
-                  {Math.round((staticOffers.filter(offer => offer.isActive).length / staticOffers.length) * 100)}% of total
+                  {stats.totalOffers > 0 ? Math.round((stats.activeOffers / stats.totalOffers) * 100) : 0}% of total
                 </p>
               </CardContent>
             </Card>
@@ -622,11 +611,7 @@ export default function OffersPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {staticOffers.filter(offer => {
-                    const now = new Date();
-                    const start = new Date(offer.startDate);
-                    return start > now;
-                  }).length}
+                  {stats.upcomingOffers}
                 </div>
                 <p className="text-xs text-gray-500">Not yet started</p>
               </CardContent>
@@ -638,11 +623,7 @@ export default function OffersPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {staticOffers.filter(offer => {
-                    const now = new Date();
-                    const end = offer.endDate ? new Date(offer.endDate) : null;
-                    return end && end < now;
-                  }).length}
+                  {stats.expiredOffers}
                 </div>
                 <p className="text-xs text-gray-500">Past end date</p>
               </CardContent>
@@ -653,7 +634,7 @@ export default function OffersPage() {
       
       {/* Add Offer Sheet */}
       <Sheet open={showAddSheet} onOpenChange={setShowAddSheet}>
-        <SheetContent className="sm:max-w-md">
+        <SheetContent className="sm:max-w-md overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Add New Offer</SheetTitle>
             <SheetDescription>
@@ -717,9 +698,8 @@ export default function OffersPage() {
                   <SelectContent>
                     <SelectItem value="percentage">Percentage</SelectItem>
                     <SelectItem value="fixed">Fixed Amount</SelectItem>
-                    <SelectItem value="bundle">Bundle Deal</SelectItem>
-                    <SelectItem value="loyalty">Loyalty Program</SelectItem>
-                    <SelectItem value="special">Special Offer</SelectItem>
+                    <SelectItem value="bundle">Bundle</SelectItem>
+                    <SelectItem value="bogo">Buy One Get One</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -756,10 +736,11 @@ export default function OffersPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="seasonal">Seasonal</SelectItem>
-                    <SelectItem value="bundle">Bundle</SelectItem>
-                    <SelectItem value="special">Special</SelectItem>
                     <SelectItem value="flash">Flash</SelectItem>
-                    <SelectItem value="loyalty">Loyalty</SelectItem>
+                    <SelectItem value="bundle">Bundle</SelectItem>
+                    <SelectItem value="clearance">Clearance</SelectItem>
+                    <SelectItem value="holiday">Holiday</SelectItem>
+                    <SelectItem value="promotion">Promotion</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -774,7 +755,6 @@ export default function OffersPage() {
                   type="date"
                   value={formData.startDate}
                   onChange={handleInputChange}
-                  required
                   className="w-full rounded-md border border-gray-300 px-4 py-2 focus:border-5 focus:outline-none"
                 />
               </div>
@@ -791,6 +771,19 @@ export default function OffersPage() {
                 />
                 <p className="text-xs text-gray-500">Leave empty for no expiration</p>
               </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="couponCode">Coupon Code (Optional)</Label>
+              <input
+                id="couponCode"
+                name="couponCode"
+                type="text"
+                value={formData.couponCode}
+                onChange={handleInputChange}
+                className="w-full rounded-md border border-gray-300 px-4 py-2 focus:border-5 focus:outline-none"
+                placeholder="SUMMER2024"
+              />
             </div>
             
             <div className="grid grid-cols-3 gap-4">
@@ -1167,6 +1160,7 @@ export default function OffersPage() {
     </div>
   )
 }
+
 
 
 

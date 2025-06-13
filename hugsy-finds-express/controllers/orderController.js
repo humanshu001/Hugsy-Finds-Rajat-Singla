@@ -1,88 +1,106 @@
 const Order = require('../models/Order');
 const Product = require('../models/Product');
-const Coupon = require('../models/Coupon');
-const { validationResult } = require('express-validator');
 
-// @desc    Get all orders
-// @route   GET /api/orders
-// @access  Public
-exports.getOrders = async (req, res) => {
+// Get all orders
+exports.getAllOrders = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    
-    const orders = await Order.find()
-      .populate('items.product', 'name price images')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    const total = await Order.countDocuments();
-    
-    res.json({
+    const { 
+      page = 1, 
+      limit = 10, 
+      sort = '-createdAt',
+      status,
+      minTotal,
+      maxTotal,
+      startDate,
+      endDate
+    } = req.query;
+
+    // Build query
+    const query = {};
+
+    // Filter by status
+    if (status) {
+      query.status = status;
+    }
+
+    // Filter by total amount
+    if (minTotal || maxTotal) {
+      query.totalAmount = {};
+      if (minTotal) query.totalAmount.$gte = Number(minTotal);
+      if (maxTotal) query.totalAmount.$lte = Number(maxTotal);
+    }
+
+    // Filter by date range
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const endDateObj = new Date(endDate);
+        endDateObj.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = endDateObj;
+      }
+    }
+
+    // Execute query with pagination
+    const orders = await Order.find(query)
+      .sort(sort)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .populate('items.product', 'name price images');
+
+    // Get total documents
+    const count = await Order.countDocuments(query);
+
+    res.status(200).json({
       orders,
-      page,
-      pages: Math.ceil(total / limit),
-      total
+      totalPages: Math.ceil(count / limit),
+      currentPage: page,
+      totalOrders: count
     });
   } catch (error) {
-    console.error('Get orders error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({
+      message: 'Error fetching orders',
+      error: error.message
+    });
   }
 };
 
-// @desc    Get an order by ID
-// @route   GET /api/orders/:id
-// @access  Public
+// Get single order
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate('items.product', 'name price images');
-    
+
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
-    
-    res.json(order);
+
+    res.status(200).json(order);
   } catch (error) {
-    console.error('Get order by ID error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({
+      message: 'Error fetching order',
+      error: error.message
+    });
   }
 };
 
-// @desc    Create a new order
-// @route   POST /api/orders
-// @access  Public
+// Create new order
 exports.createOrder = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const { items, shippingAddress, paymentMethod, couponApplied } = req.body;
+
+    // Validate items
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: 'Order must contain at least one item' });
     }
-    
-    const {
-      customerInfo,
-      items,
-      shippingAddress,
-      paymentMethod,
-      couponCode,
-      notes
-    } = req.body;
-    
-    // Validate items and calculate total
-    if (!items || items.length === 0) {
-      return res.status(400).json({ message: 'No order items' });
-    }
-    
-    const orderItems = [];
+
+    // Calculate order total and validate product availability
     let subtotal = 0;
-    
     for (const item of items) {
       const product = await Product.findById(item.product);
       
       if (!product) {
-        return res.status(404).json({ message: `Product not found: ${item.product}` });
+        return res.status(400).json({ message: `Product with ID ${item.product} not found` });
       }
       
       if (product.stock < item.quantity) {
@@ -91,88 +109,98 @@ exports.createOrder = async (req, res) => {
         });
       }
       
-      const price = product.discountPrice || product.price;
-      const itemTotal = price * item.quantity;
-      
-      orderItems.push({
-        product: item.product,
-        quantity: item.quantity,
-        price,
-        total: itemTotal
-      });
-      
-      subtotal += itemTotal;
-      
       // Update product stock
       product.stock -= item.quantity;
       await product.save();
+      
+      // Calculate item total
+      const itemTotal = product.price * item.quantity;
+      subtotal += itemTotal;
     }
-    
-    // Apply coupon if provided
+
+    // Apply discount if coupon is provided
     let discount = 0;
-    if (couponCode) {
-      const coupon = await Coupon.findOne({ 
-        code: couponCode,
-        validFrom: { $lte: new Date() },
-        $or: [
-          { validUntil: null },
-          { validUntil: { $gte: new Date() } }
-        ]
-      });
-      
-      if (!coupon) {
-        return res.status(400).json({ message: 'Invalid or expired coupon' });
-      }
-      
-      if (coupon.minOrderAmount > subtotal) {
-        return res.status(400).json({ 
-          message: `Minimum order amount for this coupon is ${coupon.minOrderAmount}` 
-        });
-      }
-      
-      if (coupon.usageCount >= coupon.usageLimit && coupon.usageLimit > 0) {
-        return res.status(
-          400
-        ).json({ message: 'This coupon has reached its usage limit' });
-      }
-      
-      discount = coupon.discountType === 'percentage'
-        ? (subtotal * coupon.discountValue) / 100
-        : coupon.discountValue;
-      
-      // Update coupon usage
-      coupon.usageCount += 1;
-      await coupon.save();
+    if (couponApplied) {
+      // Coupon validation logic would go here
+      // For now, we'll just use the provided discount amount
+      discount = couponApplied.discountAmount || 0;
     }
-    
-    const totalAmount = subtotal - discount;
-    
+
+    // Calculate shipping cost (simplified)
+    const shippingCost = 5.99;
+
+    // Calculate tax (simplified)
+    const taxRate = 0.07; // 7%
+    const tax = (subtotal - discount) * taxRate;
+
+    // Calculate total
+    const totalAmount = subtotal - discount + shippingCost + tax;
+
     // Create order
     const order = await Order.create({
-      customerInfo,
-      items: orderItems,
+      items,
+      shippingAddress,
+      paymentMethod,
+      couponApplied,
       subtotal,
       discount,
+      shippingCost,
+      tax,
       totalAmount,
-      shippingAddress,
-      paymentMethod: paymentMethod || 'cash_on_delivery',
-      couponCode: discount > 0 ? couponCode : null,
-      notes
+      status: 'pending'
     });
-    
-    res.status(201).json(order);
+
+    res.status(201).json({
+      message: 'Order created successfully',
+      order
+    });
   } catch (error) {
-    console.error('Create order error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({
+      message: 'Error creating order',
+      error: error.message
+    });
   }
 };
 
-// @desc    Update order status
-// @route   PUT /api/orders/:id/status
-// @access  Public
+// Update order
+exports.updateOrder = async (req, res) => {
+  try {
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    res.status(200).json({
+      message: 'Order updated successfully',
+      order
+    });
+  } catch (error) {
+    res.status(400).json({
+      message: 'Error updating order',
+      error: error.message
+    });
+  }
+};
+
+// Update order status
 exports.updateOrderStatus = async (req, res) => {
   try {
-    const { orderStatus } = req.body;
+    const { status } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({ message: 'Status is required' });
+    }
+    
+    // Validate status value
+    const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Invalid status value' });
+    }
     
     const order = await Order.findById(req.params.id);
     
@@ -180,14 +208,8 @@ exports.updateOrderStatus = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
     
-    // Validate order status
-    const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
-    if (!validStatuses.includes(orderStatus)) {
-      return res.status(400).json({ message: 'Invalid order status' });
-    }
-    
-    // If cancelling order, restore product stock
-    if (orderStatus === 'cancelled' && order.orderStatus !== 'cancelled') {
+    // If cancelling an order, restore product stock
+    if (status === 'cancelled' && order.status !== 'cancelled') {
       for (const item of order.items) {
         const product = await Product.findById(item.product);
         if (product) {
@@ -197,101 +219,114 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
     
-    order.orderStatus = orderStatus;
-    const updatedOrder = await order.save();
+    order.status = status;
+    await order.save();
     
-    res.json(updatedOrder);
-  } catch (error) {
-    console.error('Update order status error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// @desc    Update payment status
-// @route   PUT /api/orders/:id/payment
-// @access  Public
-exports.updatePaymentStatus = async (req, res) => {
-  try {
-    const { paymentStatus, paymentId } = req.body;
-    
-    const order = await Order.findById(req.params.id);
-    
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-    
-    // Validate payment status
-    const validStatuses = ['pending', 'completed', 'failed', 'refunded'];
-    if (!validStatuses.includes(paymentStatus)) {
-      return res.status(400).json({ message: 'Invalid payment status' });
-    }
-    
-    order.paymentStatus = paymentStatus;
-    if (paymentId) {
-      order.paymentId = paymentId;
-    }
-    
-    const updatedOrder = await order.save();
-    
-    res.json(updatedOrder);
-  } catch (error) {
-    console.error('Update payment status error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// @desc    Get orders by status
-// @route   GET /api/orders/status/:status
-// @access  Public
-exports.getOrdersByStatus = async (req, res) => {
-  try {
-    const { status } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    
-    // Validate status
-    const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: 'Invalid order status' });
-    }
-    
-    const orders = await Order.find({ orderStatus: status })
-      .populate('items.product', 'name price images')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    const total = await Order.countDocuments({ orderStatus: status });
-    
-    res.json({
-      orders,
-      page,
-      pages: Math.ceil(total / limit),
-      total
+    res.status(200).json({
+      message: 'Order status updated successfully',
+      order
     });
   } catch (error) {
-    console.error('Get orders by status error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({
+      message: 'Error updating order status',
+      error: error.message
+    });
   }
 };
 
-// @desc    Delete an order
-// @route   DELETE /api/orders/:id
-// @access  Public
+// Delete order
 exports.deleteOrder = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
-    
+    const order = await Order.findByIdAndDelete(req.params.id);
+
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
-    
-    await order.remove();
-    
-    res.json({ message: 'Order removed' });
+
+    res.status(200).json({
+      message: 'Order deleted successfully'
+    });
   } catch (error) {
-    console.error('Delete order error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({
+      message: 'Error deleting order',
+      error: error.message
+    });
+  }
+};
+
+// Get order statistics
+exports.getOrderStats = async (req, res) => {
+  try {
+    const totalOrders = await Order.countDocuments();
+    
+    const pendingOrders = await Order.countDocuments({ status: 'pending' });
+    const processingOrders = await Order.countDocuments({ status: 'processing' });
+    const shippedOrders = await Order.countDocuments({ status: 'shipped' });
+    const deliveredOrders = await Order.countDocuments({ status: 'delivered' });
+    const cancelledOrders = await Order.countDocuments({ status: 'cancelled' });
+    
+    // Get total revenue
+    const revenueResult = await Order.aggregate([
+      {
+        $match: { status: { $ne: 'cancelled' } }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$totalAmount' }
+        }
+      }
+    ]);
+    
+    const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
+    
+    // Get revenue by month (last 6 months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    
+    const revenueByMonth = await Order.aggregate([
+      {
+        $match: {
+          status: { $ne: 'cancelled' },
+          createdAt: { $gte: sixMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: { 
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' }
+          },
+          revenue: { $sum: '$totalAmount' },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { '_id.year': 1, '_id.month': 1 }
+      }
+    ]);
+    
+    res.status(200).json({
+      totalOrders,
+      ordersByStatus: {
+        pending: pendingOrders,
+        processing: processingOrders,
+        shipped: shippedOrders,
+        delivered: deliveredOrders,
+        cancelled: cancelledOrders
+      },
+      totalRevenue,
+      revenueByMonth: revenueByMonth.map(item => ({
+        year: item._id.year,
+        month: item._id.month,
+        revenue: item.revenue,
+        count: item.count
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Error fetching order statistics',
+      error: error.message
+    });
   }
 };

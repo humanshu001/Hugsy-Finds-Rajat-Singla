@@ -1,122 +1,102 @@
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const couponSchema = new mongoose.Schema({
+const couponSchema = new Schema({
   code: {
     type: String,
-    required: true,
+    required: [true, 'Coupon code is required'],
     unique: true,
     uppercase: true,
     trim: true
   },
+  description: {
+    type: String,
+    required: [true, 'Coupon description is required']
+  },
   discountType: {
     type: String,
-    required: true,
-    enum: ['percentage', 'fixed'],
-    default: 'percentage'
+    enum: ['percentage', 'fixed', 'free_shipping'],
+    required: [true, 'Discount type is required']
   },
   discountValue: {
     type: Number,
-    required: true,
-    min: 0
+    required: function() {
+      return this.discountType !== 'free_shipping';
+    },
+    min: [0, 'Discount value cannot be negative']
   },
-  minOrderAmount: {
+  minimumPurchase: {
     type: Number,
     default: 0,
-    min: 0
+    min: [0, 'Minimum purchase cannot be negative']
   },
-  maxDiscount: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  usageLimit: {
-    type: Number,
-    default: 0, // 0 means unlimited
-    min: 0
-  },
-  usedCount: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  validFrom: {
+  startDate: {
     type: Date,
     default: Date.now
   },
-  validUntil: {
-    type: Date,
-    default: null
+  endDate: {
+    type: Date
   },
   isActive: {
     type: Boolean,
     default: true
   },
-  description: {
-    type: String,
-    trim: true
-  }
+  usageLimit: {
+    type: Number,
+    default: null
+  },
+  usageCount: {
+    type: Number,
+    default: 0
+  },
+  perUserLimit: {
+    type: Number,
+    default: null
+  },
+  applicableProducts: [{
+    type: Schema.Types.ObjectId,
+    ref: 'Product'
+  }],
+  applicableCategories: [{
+    type: Schema.Types.ObjectId,
+    ref: 'Category'
+  }],
+  excludedProducts: [{
+    type: Schema.Types.ObjectId,
+    ref: 'Product'
+  }],
+  usedBy: [{
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    usageCount: {
+      type: Number,
+      default: 1
+    },
+    lastUsed: {
+      type: Date,
+      default: Date.now
+    }
+  }]
 }, {
   timestamps: true
 });
 
-// Method to check if coupon is valid
-couponSchema.methods.isValid = function(orderAmount) {
+// Check if coupon is valid
+couponSchema.methods.isValid = function() {
   const now = new Date();
   
   // Check if coupon is active
-  if (!this.isActive) {
-    return false;
-  }
+  if (!this.isActive) return false;
   
-  // Check if coupon is within valid date range
-  if (this.validFrom > now || (this.validUntil && this.validUntil < now)) {
-    return false;
-  }
+  // Check if coupon has expired
+  if (this.endDate && now > this.endDate) return false;
   
-  // Check if usage limit is reached
-  if (this.usageLimit > 0 && this.usedCount >= this.usageLimit) {
-    return false;
-  }
-  
-  // Check if order meets minimum amount
-  if (orderAmount < this.minOrderAmount) {
-    return false;
-  }
+  // Check if coupon has reached usage limit
+  if (this.usageLimit !== null && this.usageCount >= this.usageLimit) return false;
   
   return true;
 };
 
-// Method to calculate discount amount
-couponSchema.methods.calculateDiscount = function(orderAmount) {
-  let discount = 0;
-  
-  if (this.discountType === 'percentage') {
-    discount = (orderAmount * this.discountValue) / 100;
-    
-    // Apply max discount if set
-    if (this.maxDiscount > 0 && discount > this.maxDiscount) {
-      discount = this.maxDiscount;
-    }
-  } else {
-    // Fixed discount
-    discount = this.discountValue;
-    
-    // Discount cannot be more than order amount
-    if (discount > orderAmount) {
-      discount = orderAmount;
-    }
-  }
-  
-  return parseFloat(discount.toFixed(2));
-};
-
-// Method to apply coupon (increment usage count)
-couponSchema.methods.apply = async function() {
-  this.usedCount += 1;
-  await this.save();
-  return this;
-};
-
-const Coupon = mongoose.model('Coupon', couponSchema);
-
-module.exports = Coupon;
+module.exports = mongoose.model('Coupon', couponSchema);

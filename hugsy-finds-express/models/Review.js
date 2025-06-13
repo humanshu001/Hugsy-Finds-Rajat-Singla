@@ -1,18 +1,19 @@
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const reviewSchema = new mongoose.Schema({
+const reviewSchema = new Schema({
   product: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: Schema.Types.ObjectId,
     ref: 'Product',
     required: true
   },
   user: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: Schema.Types.ObjectId,
     ref: 'User'
   },
-  guestName: {
+  userName: {
     type: String,
-    trim: true
+    required: true
   },
   rating: {
     type: Number,
@@ -22,6 +23,7 @@ const reviewSchema = new mongoose.Schema({
   },
   title: {
     type: String,
+    required: true,
     trim: true
   },
   comment: {
@@ -31,57 +33,30 @@ const reviewSchema = new mongoose.Schema({
   images: [{
     type: String
   }],
-  isVerifiedPurchase: {
+  verified: {
     type: Boolean,
     default: false
   },
-  isApproved: {
-    type: Boolean,
-    default: true
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  helpful: {
+    count: {
+      type: Number,
+      default: 0
+    },
+    users: [{
+      type: Schema.Types.ObjectId,
+      ref: 'User'
+    }]
   }
 }, {
   timestamps: true
 });
 
-// Static method to calculate average rating for a product
-reviewSchema.statics.getAverageRating = async function(productId) {
-  const result = await this.aggregate([
-    {
-      $match: { 
-        product: productId,
-        isApproved: true
-      }
-    },
-    {
-      $group: {
-        _id: '$product',
-        averageRating: { $avg: '$rating' },
-        numReviews: { $sum: 1 }
-      }
-    }
-  ]);
-  
-  return result.length > 0 
-    ? { 
-        averageRating: parseFloat(result[0].averageRating.toFixed(1)), 
-        numReviews: result[0].numReviews 
-      } 
-    : { 
-        averageRating: 0, 
-        numReviews: 0 
-      };
-};
+// Prevent duplicate reviews from the same user for the same product
+reviewSchema.index({ product: 1, user: 1 }, { unique: true });
 
-// Update product rating after save
-reviewSchema.post('save', async function() {
-  await this.constructor.getAverageRating(this.product);
-});
-
-// Update product rating after remove
-reviewSchema.post('remove', async function() {
-  await this.constructor.getAverageRating(this.product);
-});
-
-const Review = mongoose.model('Review', reviewSchema);
-
-module.exports = Review;
+module.exports = mongoose.model('Review', reviewSchema);

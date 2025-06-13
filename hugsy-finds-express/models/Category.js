@@ -1,11 +1,19 @@
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const categorySchema = new mongoose.Schema({
+const categorySchema = new Schema({
   name: {
     type: String,
-    required: true,
+    required: [true, 'Category name is required'],
     trim: true,
     unique: true
+  },
+  slug: {
+    type: String,
+    required: [true, 'Category slug is required'],
+    trim: true,
+    unique: true,
+    lowercase: true
   },
   description: {
     type: String,
@@ -14,14 +22,25 @@ const categorySchema = new mongoose.Schema({
   image: {
     type: String
   },
-  isActive: {
+  parent: {
+    type: Schema.Types.ObjectId,
+    ref: 'Category',
+    default: null
+  },
+  featured: {
     type: Boolean,
-    default: true
+    default: false
+  },
+  order: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true
 });
 
-const Category = mongoose.model('Category', categorySchema);
+// Create index for faster queries
+categorySchema.index({ name: 1 });
+categorySchema.index({ slug: 1 });
 
-module.exports = Category;
+module.exports = mongoose.model('Category', categorySchema);

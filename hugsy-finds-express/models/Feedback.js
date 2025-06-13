@@ -1,36 +1,57 @@
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const feedbackSchema = new mongoose.Schema({
+const feedbackSchema = new Schema({
+  user: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
   name: {
     type: String,
-    required: true,
-    trim: true
+    required: [true, 'Name is required']
   },
   email: {
     type: String,
-    trim: true,
-    lowercase: true
+    required: [true, 'Email is required'],
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please provide a valid email address']
   },
-  mobile: {
+  subject: {
     type: String,
-    trim: true
+    required: [true, 'Subject is required']
   },
-  feedback: {
+  message: {
     type: String,
-    required: true
+    required: [true, 'Message is required']
   },
-  isResolved: {
-    type: Boolean,
-    default: false
-  },
-  adminResponse: {
+  type: {
     type: String,
-    default: ''
+    enum: ['general', 'product', 'order', 'suggestion', 'complaint', 'other'],
+    default: 'general'
+  },
+  status: {
+    type: String,
+    enum: ['new', 'in_progress', 'resolved', 'closed'],
+    default: 'new'
+  },
+  priority: {
+    type: String,
+    enum: ['low', 'medium', 'high'],
+    default: 'medium'
+  },
+  assignedTo: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  response: {
+    message: String,
+    respondedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    respondedAt: Date
   }
 }, {
   timestamps: true
 });
 
-const Feedback = mongoose.model('Feedback', feedbackSchema);
-
-module.exports = Feedback;
+module.exports = mongoose.model('Feedback', feedbackSchema);

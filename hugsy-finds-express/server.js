@@ -3,6 +3,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
 const mongoose = require('mongoose');
+const multer = require('multer');
 require('dotenv').config();
 
 // Import routes
@@ -12,6 +13,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
 const couponRoutes = require('./routes/couponRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
+const offerRoutes = require('./routes/offerRoutes');
 
 // Initialize express app
 const app = express();
@@ -23,6 +25,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev')); // Logging
 
+// Set up multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage: storage });
+
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -33,10 +47,22 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/feedbacks', feedbackRoutes);
+app.use('/api/offers', offerRoutes);
 
 // Root route
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to Hugsy Finds API' });
+});
+
+// Debug route to test form data parsing
+app.post('/api/test-form', upload.single('testFile'), (req, res) => {
+  console.log('Test form body:', req.body);
+  console.log('Test file:', req.file);
+  res.json({ 
+    message: 'Form data received',
+    body: req.body,
+    file: req.file ? req.file.filename : null
+  });
 });
 
 // Error handling middleware
@@ -49,7 +75,7 @@ app.use((err, req, res, next) => {
 });
 
 // Connect to MongoDB and start server
-mongoose.connect(process.env.MONGODB_URI)
+mongoose.connect(process.env.MONGODB_URI ?? "mongodb://localhost:27017/hugsy-finds")
   .then(() => {
     console.log('Connected to MongoDB');
     app.listen(PORT, () => {
@@ -60,4 +86,5 @@ mongoose.connect(process.env.MONGODB_URI)
     console.error('MongoDB connection error:', err);
     process.exit(1);
   });
+
 

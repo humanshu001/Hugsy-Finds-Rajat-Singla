@@ -11,22 +11,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { toast } from 'react-hot-toast'
+import axios from 'axios'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export default function CategoriesPage() {
-  // Static categories data for demo
-  const staticCategories = [
-    { id: 1, name: "Toys", slug: "toys", description: "Children's toys and games", image: "/images/categories/toys.jpg" },
-    { id: 2, name: "Home", slug: "home", description: "Home decor and accessories", image: "/images/categories/home.jpg" },
-    { id: 3, name: "Decor", slug: "decor", description: "Decorative items for your space", image: "/images/categories/decor.jpg" },
-    { id: 4, name: "Gifts", slug: "gifts", description: "Perfect items for gifting", image: "/images/categories/gifts.jpg" }
-  ];
-
-  const [categories, setCategories] = useState(staticCategories)
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [searchTerm, setSearchTerm] = useState('')
+  const [limit] = useState(10)
   
   // Modal states
   const [showAddSheet, setShowAddSheet] = useState(false)
@@ -37,9 +34,52 @@ export default function CategoriesPage() {
   // Form states
   const [formData, setFormData] = useState({
     name: '',
+    slug: '',
     description: '',
-    image: ''
+    parent: '',
+    image: '',
+    featured: false,
+    order: 0
   })
+  
+  // File upload state
+  const [categoryImage, setCategoryImage] = useState(null)
+  const [imagePreview, setImagePreview] = useState('')
+  
+  // Fetch categories from API
+  const fetchCategories = async () => {
+    setLoading(true)
+    try {
+      let url = `${API_URL}/categories?page=${currentPage}&limit=${limit}`
+      
+      // Add search term if present
+      if (searchTerm.trim() !== '') {
+        url += `&search=${searchTerm}`
+      }
+      
+      const response = await axios.get(url)
+      setCategories(response.data.categories || response.data)
+      setTotalPages(response.data.totalPages || 1)
+      setError(null)
+    } catch (err) {
+      setError('Failed to fetch categories. Please try again later.')
+      console.error('Error fetching categories:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  // Initial data fetch
+  useEffect(() => {
+    fetchCategories()
+  }, [currentPage])
+  
+  // Handle search with API
+  const handleSearch = (e) => {
+    e.preventDefault()
+    setCurrentPage(1)
+    fetchCategories()
+  }
   
   // Handle pagination
   const handlePrevPage = () => {
@@ -54,40 +94,47 @@ export default function CategoriesPage() {
     }
   }
   
-  // Handle search
-  const handleSearch = (e) => {
-    e.preventDefault()
-    
-    if (searchTerm.trim() === '') {
-      setCategories(staticCategories)
-      return
-    }
-    
-    // Filter categories based on search term
-    const filtered = staticCategories.filter(category => 
-      category.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (category.description && category.description.toLowerCase().includes(searchTerm.toLowerCase()))
-    )
-    
-    setCategories(filtered)
-  }
-  
   // Handle form input changes
   const handleInputChange = (e) => {
-    const { name, value } = e.target
+    const { name, value, type, checked } = e.target
+    
+    // Update form data
     setFormData({
       ...formData,
-      [name]: value
+      [name]: type === 'checkbox' ? checked : value
     })
+    
+    // Auto-generate slug when name changes and slug is empty
+    if (name === 'name' && (!formData.slug || formData.slug === '')) {
+      setFormData(prev => ({
+        ...prev,
+        slug: value.toLowerCase().replace(/\s+/g, '-')
+      }))
+    }
+  }
+  
+  // Handle image selection
+  const handleImageChange = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      setCategoryImage(file)
+      setImagePreview(URL.createObjectURL(file))
+    }
   }
   
   // Open add category sheet
   const openAddCategorySheet = () => {
     setFormData({
       name: '',
+      slug: '',
       description: '',
-      image: ''
+      parent: '',
+      image: '',
+      featured: false,
+      order: 0
     })
+    setCategoryImage(null)
+    setImagePreview('')
     setShowAddSheet(true)
   }
   
@@ -95,11 +142,30 @@ export default function CategoriesPage() {
   const openEditCategorySheet = (category) => {
     setSelectedCategory(category)
     setFormData({
-      id: category.id,
+      id: category._id,
       name: category.name,
+      slug: category.slug || '',
       description: category.description || '',
-      image: category.image || ''
+      parent: category.parent?._id || '',
+      image: category.image || '',
+      featured: category.featured || false,
+      order: category.order || 0
     })
+    
+    // Reset image preview
+    setCategoryImage(null)
+    
+    // If category has image, set it as preview
+    if (category.image) {
+      setImagePreview(
+        category.image.startsWith('http') 
+          ? category.image 
+          : `${API_URL}/uploads/${category.image}`
+      )
+    } else {
+      setImagePreview('')
+    }
+    
     setShowEditSheet(true)
   }
   
@@ -109,63 +175,137 @@ export default function CategoriesPage() {
     setShowDeleteDialog(true)
   }
   
-  // Handle add category
-  const handleAddCategory = (e) => {
+  // Handle add category with API
+  const handleAddCategory = async (e) => {
     e.preventDefault()
     
-    // Create new category with mock data
-    const newCategory = {
-      id: Date.now(),
-      name: formData.name,
-      slug: formData.name.toLowerCase().replace(/\s+/g, '-'),
-      description: formData.description,
-      image: formData.image || '/images/categories/placeholder.jpg'
-    }
-    
-    setCategories([...categories, newCategory])
-    setShowAddSheet(false)
-    
-    // Show success message
-    alert('Category added successfully!')
-  }
-  
-  // Handle edit category
-  const handleEditCategory = (e) => {
-    e.preventDefault()
-    
-    // Update the category
-    const updatedCategories = categories.map(category => {
-      if (category.id === formData.id) {
-        return {
-          ...category,
-          name: formData.name,
-          slug: formData.name.toLowerCase().replace(/\s+/g, '-'),
-          description: formData.description,
-          image: formData.image || category.image
-        }
+    try {
+      // Validate required fields
+      if (!formData.name.trim()) {
+        return toast.error('Category name is required')
       }
-      return category
-    })
-    
-    setCategories(updatedCategories)
-    setShowEditSheet(false)
-    
-    // Show success message
-    alert('Category updated successfully!')
+      
+      // Create form data for file upload
+      const formDataToSend = new FormData()
+      
+      // Ensure name is properly set
+      formDataToSend.append('name', formData.name.trim())
+      
+      // Generate slug if empty or use provided slug
+      const slug = formData.slug.trim() 
+        ? formData.slug.trim() 
+        : formData.name.trim().toLowerCase().replace(/\s+/g, '-')
+      
+      formDataToSend.append('slug', slug)
+      formDataToSend.append('description', formData.description)
+      formDataToSend.append('featured', formData.featured)
+      formDataToSend.append('order', formData.order)
+      
+      // Add parent if selected
+      if (formData.parent) {
+        formDataToSend.append('parent', formData.parent)
+      }
+      
+      // Append image file if selected
+      if (categoryImage) {
+        formDataToSend.append('categoryImage', categoryImage)
+      }
+      
+      // Log the form data for debugging
+      console.log('Sending category data:', {
+        name: formData.name.trim(),
+        slug: slug,
+        description: formData.description,
+        featured: formData.featured,
+        order: formData.order,
+        parent: formData.parent || null
+      })
+      
+      const response = await axios.post(`${API_URL}/categories`, formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      
+      // Refresh categories list
+      fetchCategories()
+      
+      setShowAddSheet(false)
+      toast.success('Category added successfully!')
+    } catch (err) {
+      console.error('Error adding category:', err)
+      toast.error(err.response?.data?.message || 'Failed to add category')
+    }
   }
   
-  // Handle delete category
-  const handleDeleteCategory = () => {
+  // Handle edit category with API
+  const handleEditCategory = async (e) => {
+    e.preventDefault()
+    
+    try {
+      // Validate required fields
+      if (!formData.name.trim()) {
+        return toast.error('Category name is required')
+      }
+      
+      if (!formData.slug.trim()) {
+        return toast.error('Category slug is required')
+      }
+      
+      // Create form data for file upload
+      const formDataToSend = new FormData()
+      formDataToSend.append('name', formData.name.trim())
+      formDataToSend.append('slug', formData.slug.trim())
+      formDataToSend.append('description', formData.description)
+      formDataToSend.append('featured', formData.featured)
+      formDataToSend.append('order', formData.order)
+      
+      // Add parent if selected
+      if (formData.parent) {
+        formDataToSend.append('parent', formData.parent)
+      } else {
+        // Explicitly set parent to null if not selected
+        formDataToSend.append('parent', 'null')
+      }
+      
+      // Append image file if selected
+      if (categoryImage) {
+        formDataToSend.append('categoryImage', categoryImage)
+      }
+      
+      const response = await axios.put(`${API_URL}/categories/${formData.id}`, formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      
+      // Refresh categories list
+      fetchCategories()
+      
+      setShowEditSheet(false)
+      toast.success('Category updated successfully!')
+    } catch (err) {
+      console.error('Error updating category:', err)
+      toast.error(err.response?.data?.message || 'Failed to update category')
+    }
+  }
+  
+  // Handle delete category with API
+  const handleDeleteCategory = async () => {
     if (!selectedCategory) return
     
-    // Filter out the deleted category
-    const updatedCategories = categories.filter(category => category.id !== selectedCategory.id)
-    
-    setCategories(updatedCategories)
-    setShowDeleteDialog(false)
-    
-    // Show success message
-    alert('Category deleted successfully!')
+    try {
+      await axios.delete(`${API_URL}/categories/${selectedCategory._id}`)
+      
+      // Refresh categories list
+      fetchCategories()
+      
+      setShowDeleteDialog(false)
+      toast.success('Category deleted successfully!')
+    } catch (err) {
+      console.error('Error deleting category:', err)
+      toast.error(err.response?.data?.message || 'Failed to delete category')
+    }
   }
   
   return (
@@ -209,18 +349,64 @@ export default function CategoriesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>ID</TableHead>
+                  <TableHead>Image</TableHead>
                   <TableHead>Name</TableHead>
-                  <TableHead>Description</TableHead>
+                  <TableHead>Slug</TableHead>
+                  <TableHead>Parent</TableHead>
+                  <TableHead>Featured</TableHead>
+                  <TableHead>Order</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {categories.length > 0 ? (
                   categories.map((category) => (
-                    <TableRow key={category.id}>
-                      <TableCell className="font-medium">{category.id}</TableCell>
+                    <TableRow key={category._id}>
+                      <TableCell className="font-medium">{category._id.substring(0, 8)}...</TableCell>
+                      <TableCell>
+                        {category.image ? (
+                          <div className="h-12 w-12 overflow-hidden rounded-md">
+                            <img 
+                              src={category.image.startsWith('http') 
+                                ? category.image 
+                                : `${API_URL}/uploads/${category.image}`} 
+                              alt={category.name} 
+                              className="h-full w-full object-cover"
+                              onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.src = `https://placehold.co/100x100?text=${category.name.charAt(0)}`;
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gray-100">
+                            <span className="text-lg font-semibold text-gray-500">
+                              {category.name.charAt(0)}
+                            </span>
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell>{category.name}</TableCell>
-                      <TableCell className="max-w-xs truncate">{category.description || '-'}</TableCell>
+                      <TableCell>{category.slug}</TableCell>
+                      <TableCell>
+                        {category.parent ? (
+                          <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
+                            {category.parent.name}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {category.featured ? (
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">No</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{category.order || 0}</TableCell>
                       <TableCell className="text-right">
                         <Button 
                           variant="ghost" 
@@ -243,7 +429,7 @@ export default function CategoriesPage() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center">
+                    <TableCell colSpan={8} className="text-center">
                       No categories found
                     </TableCell>
                   </TableRow>
@@ -305,6 +491,23 @@ export default function CategoriesPage() {
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
               />
             </div>
+            
+            <div className="space-y-2">
+              <label htmlFor="slug" className="text-sm font-medium">
+                Slug <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="slug"
+                name="slug"
+                type="text"
+                required
+                value={formData.slug}
+                onChange={handleInputChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              />
+              <p className="text-xs text-gray-500">URL-friendly version of the name (e.g., "home-decor")</p>
+            </div>
+            
             <div className="space-y-2">
               <label htmlFor="description" className="text-sm font-medium">
                 Description
@@ -318,20 +521,91 @@ export default function CategoriesPage() {
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
               ></textarea>
             </div>
+            
             <div className="space-y-2">
-              <label htmlFor="image" className="text-sm font-medium">
-                Image URL
+              <label htmlFor="parent" className="text-sm font-medium">
+                Parent Category (Optional)
+              </label>
+              <select
+                id="parent"
+                name="parent"
+                value={formData.parent || ""}
+                onChange={handleInputChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              >
+                <option value="">None (Top Level Category)</option>
+                {categories.map((category) => (
+                  // Don't show the current category as a parent option when editing
+                  formData.id !== category._id && (
+                    <option key={category._id} value={category._id}>
+                      {category.name}
+                    </option>
+                  )
+                ))}
+              </select>
+            </div>
+            
+            <div className="space-y-2">
+              <label htmlFor="order" className="text-sm font-medium">
+                Display Order
               </label>
               <input
-                id="image"
-                name="image"
-                type="text"
-                value={formData.image}
+                id="order"
+                name="order"
+                type="number"
+                value={formData.order}
                 onChange={handleInputChange}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
               />
+              <p className="text-xs text-gray-500">Lower numbers appear first</p>
             </div>
+            
+            <div className="flex items-center space-x-2">
+              <input
+                id="featured"
+                name="featured"
+                type="checkbox"
+                checked={formData.featured}
+                onChange={handleInputChange}
+                className="h-4 w-4 rounded border-gray-300 text-5 focus:ring-5"
+              />
+              <label htmlFor="featured" className="text-sm font-medium">
+                Featured Category
+              </label>
+            </div>
+            
+            <div className="space-y-2">
+              <label htmlFor="categoryImage" className="text-sm font-medium">
+                Category Image
+              </label>
+              <input
+                id="categoryImage"
+                name="categoryImage"
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              />
+              
+              {/* Image Preview */}
+              {imagePreview && (
+                <div className="mt-2">
+                  <p className="text-sm text-gray-500 mb-1">Image Preview:</p>
+                  <div className="h-32 w-32 overflow-hidden rounded-md">
+                    <img 
+                      src={imagePreview} 
+                      alt="Category preview"
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+            
             <SheetFooter className="pt-4">
+              <Button type="button" variant="outline" onClick={() => setShowAddSheet(false)}>
+                Cancel
+              </Button>
               <Button type="submit">Add Category</Button>
             </SheetFooter>
           </form>
@@ -349,6 +623,7 @@ export default function CategoriesPage() {
           </SheetHeader>
           <form onSubmit={handleEditCategory} className="space-y-4 p-4">
             <input type="hidden" name="id" value={formData.id} />
+            
             <div className="space-y-2">
               <label htmlFor="edit-name" className="text-sm font-medium">
                 Category Name
@@ -363,6 +638,23 @@ export default function CategoriesPage() {
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
               />
             </div>
+            
+            <div className="space-y-2">
+              <label htmlFor="edit-slug" className="text-sm font-medium">
+                Slug <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="edit-slug"
+                name="slug"
+                type="text"
+                required
+                value={formData.slug}
+                onChange={handleInputChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              />
+              <p className="text-xs text-gray-500">URL-friendly version of the name (e.g., "home-decor")</p>
+            </div>
+            
             <div className="space-y-2">
               <label htmlFor="edit-description" className="text-sm font-medium">
                 Description
@@ -376,58 +668,114 @@ export default function CategoriesPage() {
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
               ></textarea>
             </div>
+            
             <div className="space-y-2">
-              <label htmlFor="edit-image" className="text-sm font-medium">
-                Image URL
+              <label htmlFor="edit-parent" className="text-sm font-medium">
+                Parent Category (Optional)
+              </label>
+              <select
+                id="edit-parent"
+                name="parent"
+                value={formData.parent || ""}
+                onChange={handleInputChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              >
+                <option value="">None (Top Level Category)</option>
+                {categories.map((category) => (
+                  // Don't show the current category as a parent option
+                  formData.id !== category._id && (
+                    <option key={category._id} value={category._id}>
+                      {category.name}
+                    </option>
+                  )
+                ))}
+              </select>
+            </div>
+            
+            <div className="space-y-2">
+              <label htmlFor="edit-order" className="text-sm font-medium">
+                Display Order
               </label>
               <input
-                id="edit-image"
-                name="image"
-                type="text"
-                value={formData.image}
+                id="edit-order"
+                name="order"
+                type="number"
+                value={formData.order}
                 onChange={handleInputChange}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
               />
-              {formData.image && (
+              <p className="text-xs text-gray-500">Lower numbers appear first</p>
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <input
+                id="edit-featured"
+                name="featured"
+                type="checkbox"
+                checked={formData.featured}
+                onChange={handleInputChange}
+                className="h-4 w-4 rounded border-gray-300 text-5 focus:ring-5"
+              />
+              <label htmlFor="edit-featured" className="text-sm font-medium">
+                Featured Category
+              </label>
+            </div>
+            
+            <div className="space-y-2">
+              <label htmlFor="edit-categoryImage" className="text-sm font-medium">
+                Category Image
+              </label>
+              <input
+                id="edit-categoryImage"
+                name="categoryImage"
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-5 focus:outline-none"
+              />
+              <p className="text-xs text-gray-500">
+                Leave empty to keep current image
+              </p>
+              
+              {/* Current Image Preview */}
+              {imagePreview && (
                 <div className="mt-2">
-                  <p className="text-sm text-gray-500 mb-1">Image Preview:</p>
-                  <img 
-                    src={formData.image} 
-                    alt={formData.name}
-                    className="h-20 w-20 object-cover rounded-md"
-                    onError={(e) => {
-                      e.target.src = 'https://placehold.co/200x200?text=No+Image';
-                    }}
-                  />
+                  <p className="text-sm text-gray-500 mb-1">Current Image:</p>
+                  <div className="h-32 w-32 overflow-hidden rounded-md">
+                    <img 
+                      src={imagePreview} 
+                      alt="Category preview"
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
                 </div>
               )}
             </div>
+            
             <SheetFooter className="pt-4">
-              <Button type="submit" className='w-full'>Update Category</Button>
+              <Button type="button" variant="outline" onClick={() => setShowEditSheet(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Update Category</Button>
             </SheetFooter>
           </form>
         </SheetContent>
       </Sheet>
       
-      {/* Delete Category Dialog */}
+      {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Category</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this category? This action cannot be undone.
+              Are you sure you want to delete "{selectedCategory?.name}"? This action cannot be undone.
+              {selectedCategory?.parent && (
+                <p className="mt-2 text-amber-600">
+                  Warning: This may affect products assigned to this category.
+                </p>
+              )}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            {selectedCategory && (
-              <p>
-                You are about to delete <strong>{selectedCategory.name}</strong>.
-              </p>
-            )}
-            <p className="mt-2 text-sm text-amber-600">
-              Warning: Deleting a category may affect products assigned to it.
-            </p>
-          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
               Cancel
@@ -441,4 +789,11 @@ export default function CategoriesPage() {
     </div>
   )
 }
+
+
+
+
+
+
+
 

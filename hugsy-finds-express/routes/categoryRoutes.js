@@ -1,41 +1,35 @@
 const express = require('express');
 const router = express.Router();
-const { check } = require('express-validator');
 const categoryController = require('../controllers/categoryController');
-const { uploadSingleImage } = require('../middleware/uploadMiddleware');
+const multer = require('multer');
+const path = require('path');
 
-// @route   GET /api/categories
-// @desc    Get all categories
-// @access  Public
-router.get('/', categoryController.getCategories);
+// Set up multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
 
-// @route   GET /api/categories/:id
-// @desc    Get a category by ID
-// @access  Public
+const upload = multer({ storage: storage });
+
+// GET all categories
+router.get('/', categoryController.getAllCategories);
+
+// GET single category by ID
 router.get('/:id', categoryController.getCategoryById);
 
-// @route   POST /api/categories
-// @desc    Create a new category
-// @access  Public
-router.post('/',
-  uploadSingleImage('image'),
-  [
-    check('name', 'Name is required').notEmpty()
-  ],
-  categoryController.createCategory
-);
+// POST create new category with file upload
+router.post('/', upload.single('categoryImage'), categoryController.createCategory);
 
-// @route   PUT /api/categories/:id
-// @desc    Update a category
-// @access  Public
-router.put('/:id',
-  uploadSingleImage('image'),
-  categoryController.updateCategory
-);
+// PUT update category with file upload
+router.put('/:id', upload.single('categoryImage'), categoryController.updateCategory);
 
-// @route   DELETE /api/categories/:id
-// @desc    Delete a category
-// @access  Public
+// DELETE category
 router.delete('/:id', categoryController.deleteCategory);
 
 module.exports = router;
+

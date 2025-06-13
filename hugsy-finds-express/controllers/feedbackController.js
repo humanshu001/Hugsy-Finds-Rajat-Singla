@@ -1,193 +1,260 @@
 const Feedback = require('../models/Feedback');
-const { validationResult } = require('express-validator');
 
-// @desc    Get all feedbacks
-// @route   GET /api/feedbacks
-// @access  Public
-exports.getFeedbacks = async (req, res) => {
+// Get all feedback
+exports.getAllFeedback = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    
-    const feedbacks = await Feedback.find()
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    const total = await Feedback.countDocuments();
-    
-    res.json({
-      items: feedbacks,
-      meta: {
-        total,
-        page,
-        limit,
-        pages: Math.ceil(total / limit)
-      }
+    const { 
+      page = 1, 
+      limit = 10, 
+      sort = '-createdAt',
+      status,
+      type,
+      priority
+    } = req.query;
+
+    // Build query
+    const query = {};
+
+    // Filter by status
+    if (status) {
+      query.status = status;
+    }
+
+    // Filter by type
+    if (type) {
+      query.type = type;
+    }
+
+    // Filter by priority
+    if (priority) {
+      query.priority = priority;
+    }
+
+    // Execute query with pagination
+    const feedback = await Feedback.find(query)
+      .sort(sort)
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    // Get total documents
+    const count = await Feedback.countDocuments(query);
+
+    res.status(200).json({
+      feedback,
+      totalPages: Math.ceil(count / limit),
+      currentPage: page,
+      totalFeedback: count
     });
   } catch (error) {
-    console.error('Get feedbacks error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({
+      message: 'Error fetching feedback',
+      error: error.message
+    });
   }
 };
 
-// @desc    Get a feedback by ID
-// @route   GET /api/feedbacks/:id
-// @access  Public
+// Get single feedback
 exports.getFeedbackById = async (req, res) => {
   try {
     const feedback = await Feedback.findById(req.params.id);
-    
+
     if (!feedback) {
       return res.status(404).json({ message: 'Feedback not found' });
     }
-    
-    res.json(feedback);
+
+    res.status(200).json(feedback);
   } catch (error) {
-    console.error('Get feedback by ID error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({
+      message: 'Error fetching feedback',
+      error: error.message
+    });
   }
 };
 
-// @desc    Create a new feedback
-// @route   POST /api/feedbacks
-// @access  Public
+// Create new feedback
 exports.createFeedback = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-    
-    const { name, email, mobile, feedback } = req.body;
-    
-    // Validate required fields
-    if (!name || !feedback) {
-      return res.status(400).json({ message: 'Missing required fields' });
-    }
-    
-    const newFeedback = await Feedback.create({
-      name,
-      email: email || '',
-      mobile: mobile || '',
-      feedback
-    });
-    
+    const feedback = await Feedback.create(req.body);
+
     res.status(201).json({
       message: 'Feedback submitted successfully',
-      id: newFeedback._id
+      feedback
     });
   } catch (error) {
-    console.error('Create feedback error:', error);
-    res.status(500).json({ message: 'Unable to submit feedback' });
+    res.status(400).json({
+      message: 'Error submitting feedback',
+      error: error.message
+    });
   }
 };
 
-// @desc    Update a feedback
-// @route   PUT /api/feedbacks/:id
-// @access  Public
-exports.updateFeedback = async (req, res) => {
+// Update feedback status
+exports.updateFeedbackStatus = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const { status } = req.body;
+    
+    if (!status || !['new', 'in_progress', 'resolved', 'closed'].includes(status)) {
+      return res.status(400).json({ message: 'Valid status is required' });
     }
     
-    const feedback = await Feedback.findById(req.params.id);
-    
+    const feedback = await Feedback.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true, runValidators: true }
+    );
+
     if (!feedback) {
       return res.status(404).json({ message: 'Feedback not found' });
     }
-    
-    const { name, email, mobile, feedback: feedbackText, isResolved, adminResponse } = req.body;
-    
-    // Update feedback fields
-    if (name) feedback.name = name;
-    if (email !== undefined) feedback.email = email;
-    if (mobile !== undefined) feedback.mobile = mobile;
-    if (feedbackText) feedback.feedback = feedbackText;
-    if (isResolved !== undefined) feedback.isResolved = isResolved;
-    if (adminResponse !== undefined) feedback.adminResponse = adminResponse;
-    
-    const updatedFeedback = await feedback.save();
-    
-    res.json({
-      message: 'Feedback updated successfully',
-      feedback: updatedFeedback
+
+    res.status(200).json({
+      message: 'Feedback status updated successfully',
+      feedback
     });
   } catch (error) {
-    console.error('Update feedback error:', error);
-    res.status(500).json({ message: 'Unable to update feedback' });
+    res.status(400).json({
+      message: 'Error updating feedback status',
+      error: error.message
+    });
   }
 };
 
-// @desc    Delete a feedback
-// @route   DELETE /api/feedbacks/:id
-// @access  Public
+// Update feedback priority
+exports.updateFeedbackPriority = async (req, res) => {
+  try {
+    const { priority } = req.body;
+    
+    if (!priority || !['low', 'medium', 'high'].includes(priority)) {
+      return res.status(400).json({ message: 'Valid priority is required' });
+    }
+    
+    const feedback = await Feedback.findByIdAndUpdate(
+      req.params.id,
+      { priority },
+      { new: true, runValidators: true }
+    );
+
+    if (!feedback) {
+      return res.status(404).json({ message: 'Feedback not found' });
+    }
+
+    res.status(200).json({
+      message: 'Feedback priority updated successfully',
+      feedback
+    });
+  } catch (error) {
+    res.status(400).json({
+      message: 'Error updating feedback priority',
+      error: error.message
+    });
+  }
+};
+
+// Add response to feedback
+exports.addFeedbackResponse = async (req, res) => {
+  try {
+    const { message } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ message: 'Response message is required' });
+    }
+    
+    const feedback = await Feedback.findByIdAndUpdate(
+      req.params.id,
+      { 
+        response: {
+          message,
+          respondedAt: new Date()
+        },
+        status: 'resolved' // Automatically mark as resolved when response is added
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!feedback) {
+      return res.status(404).json({ message: 'Feedback not found' });
+    }
+
+    res.status(200).json({
+      message: 'Response added successfully',
+      feedback
+    });
+  } catch (error) {
+    res.status(400).json({
+      message: 'Error adding response',
+      error: error.message
+    });
+  }
+};
+
+// Delete feedback
 exports.deleteFeedback = async (req, res) => {
   try {
-    const feedback = await Feedback.findById(req.params.id);
-    
+    const feedback = await Feedback.findByIdAndDelete(req.params.id);
+
     if (!feedback) {
       return res.status(404).json({ message: 'Feedback not found' });
     }
-    
-    await feedback.remove();
-    
-    res.json({ message: 'Feedback deleted successfully' });
-  } catch (error) {
-    console.error('Delete feedback error:', error);
-    res.status(500).json({ message: 'Unable to delete feedback' });
-  }
-};
 
-// @desc    Get recent feedbacks
-// @route   GET /api/feedbacks/recent
-// @access  Public
-exports.getRecentFeedbacks = async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 5;
-    
-    const feedbacks = await Feedback.find()
-      .sort({ createdAt: -1 })
-      .limit(limit);
-    
-    res.json(feedbacks);
-  } catch (error) {
-    console.error('Get recent feedbacks error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// @desc    Respond to a feedback
-// @route   POST /api/feedbacks/:id/respond
-// @access  Public
-exports.respondToFeedback = async (req, res) => {
-  try {
-    const { response } = req.body;
-    
-    if (!response) {
-      return res.status(400).json({ message: 'Response is required' });
-    }
-    
-    const feedback = await Feedback.findById(req.params.id);
-    
-    if (!feedback) {
-      return res.status(404).json({ message: 'Feedback not found' });
-    }
-    
-    feedback.adminResponse = response;
-    feedback.isResolved = true;
-    
-    const updatedFeedback = await feedback.save();
-    
-    res.json({
-      message: 'Response added successfully',
-      feedback: updatedFeedback
+    res.status(200).json({
+      message: 'Feedback deleted successfully'
     });
   } catch (error) {
-    console.error('Respond to feedback error:', error);
-    res.status(500).json({ message: 'Unable to respond to feedback' });
+    res.status(500).json({
+      message: 'Error deleting feedback',
+      error: error.message
+    });
+  }
+};
+
+// Get feedback statistics
+exports.getFeedbackStats = async (req, res) => {
+  try {
+    const statusCounts = await Feedback.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    const typeCounts = await Feedback.aggregate([
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    const priorityCounts = await Feedback.aggregate([
+      {
+        $group: {
+          _id: '$priority',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    res.status(200).json({
+      statusCounts: statusCounts.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {}),
+      typeCounts: typeCounts.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {}),
+      priorityCounts: priorityCounts.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {})
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Error fetching feedback statistics',
+      error: error.message
+    });
   }
 };

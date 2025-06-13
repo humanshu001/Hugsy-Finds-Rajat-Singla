@@ -1,48 +1,40 @@
 const express = require('express');
 const router = express.Router();
-const { check } = require('express-validator');
 const productController = require('../controllers/productController');
-const { uploadMultipleImages } = require('../middleware/uploadMiddleware');
+const multer = require('multer');
+const path = require('path');
 
-// @route   GET /api/products
-// @desc    Get all products
-// @access  Public
-router.get('/', productController.getProducts);
+// Set up multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
 
-// @route   GET /api/products/featured
-// @desc    Get featured products
-// @access  Public
-router.get('/featured', productController.getFeaturedProducts);
+const upload = multer({ storage: storage });
 
-// @route   GET /api/products/:id
-// @desc    Get a product by ID
-// @access  Public
+// GET all products
+router.get('/', productController.getAllProducts);
+
+// GET single product by ID
 router.get('/:id', productController.getProductById);
 
-// @route   POST /api/products
-// @desc    Create a new product
-// @access  Public
-router.post('/',
-  uploadMultipleImages('images', 5),
-  [
-    check('name', 'Name is required').notEmpty(),
-    check('price', 'Price is required and must be a number').isNumeric(),
-    check('category', 'Category is required').notEmpty()
-  ],
-  productController.createProduct
-);
+// GET products by category
+router.get('/category/:categoryId', productController.getProductsByCategory);
 
-// @route   PUT /api/products/:id
-// @desc    Update a product
-// @access  Public
-router.put('/:id',
-  uploadMultipleImages('images', 5),
-  productController.updateProduct
-);
+// POST create new product with file upload
+router.post('/', upload.array('productImages', 10), productController.createProduct);
 
-// @route   DELETE /api/products/:id
-// @desc    Delete a product
-// @access  Public
+// PUT update product with file upload
+router.put('/:id', upload.array('productImages', 10), productController.updateProduct);
+
+// DELETE product
 router.delete('/:id', productController.deleteProduct);
+
+// PATCH update product stock
+router.patch('/:id/stock', productController.updateProductStock);
 
 module.exports = router;

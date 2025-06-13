@@ -1,47 +1,29 @@
 const express = require('express');
 const router = express.Router();
-const { check } = require('express-validator');
 const feedbackController = require('../controllers/feedbackController');
 
-// @route   GET /api/feedbacks
-// @desc    Get all feedbacks
-// @access  Public
-router.get('/', feedbackController.getFeedbacks);
+// GET all feedback
+router.get('/', feedbackController.getAllFeedback);
 
-// @route   GET /api/feedbacks/recent
-// @desc    Get recent feedbacks
-// @access  Public
-router.get('/recent', feedbackController.getRecentFeedbacks);
-
-// @route   GET /api/feedbacks/:id
-// @desc    Get a feedback by ID
-// @access  Public
+// GET single feedback by ID
 router.get('/:id', feedbackController.getFeedbackById);
 
-// @route   POST /api/feedbacks
-// @desc    Create a new feedback
-// @access  Public
-router.post('/',
-  [
-    check('name', 'Name is required').notEmpty(),
-    check('feedback', 'Feedback is required').notEmpty()
-  ],
-  feedbackController.createFeedback
-);
+// POST create new feedback
+router.post('/', feedbackController.createFeedback);
 
-// @route   PUT /api/feedbacks/:id
-// @desc    Update a feedback
-// @access  Public
-router.put('/:id', feedbackController.updateFeedback);
+// PATCH update feedback status
+router.patch('/:id/status', feedbackController.updateFeedbackStatus);
 
-// @route   DELETE /api/feedbacks/:id
-// @desc    Delete a feedback
-// @access  Public
+// PATCH update feedback priority
+router.patch('/:id/priority', feedbackController.updateFeedbackPriority);
+
+// PATCH add response to feedback
+router.patch('/:id/respond', feedbackController.addFeedbackResponse);
+
+// DELETE feedback
 router.delete('/:id', feedbackController.deleteFeedback);
 
-// @route   POST /api/feedbacks/:id/respond
-// @desc    Respond to a feedback
-// @access  Public
-router.post('/:id/respond', feedbackController.respondToFeedback);
+// GET feedback statistics
+router.get('/stats/summary', feedbackController.getFeedbackStats);
 
 module.exports = router;

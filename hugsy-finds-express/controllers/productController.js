@@ -1,177 +1,352 @@
 const Product = require('../models/Product');
-const { validationResult } = require('express-validator');
+const Category = require('../models/Category');
 
-// @desc    Get all products
-// @route   GET /api/products
-// @access  Public
-exports.getProducts = async (req, res) => {
+// Get all products
+exports.getAllProducts = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    
-    const filter = { isActive: true };
-    
-    // Apply category filter if provided
-    if (req.query.category) {
-      filter.category = req.query.category;
+    const { 
+      page = 1, 
+      limit = 10, 
+      sort = '-createdAt',
+      category,
+      featured,
+      minPrice,
+      maxPrice,
+      search
+    } = req.query;
+
+    // Build query
+    const query = {};
+
+    // Filter by category
+    if (category) {
+      query.category = category;
     }
-    
-    // Apply search filter if provided
-    if (req.query.search) {
-      filter.$text = { $search: req.query.search };
+
+    // Filter by featured
+    if (featured) {
+      query.featured = featured === 'true';
     }
-    
-    const products = await Product.find(filter)
-      .populate('category', 'name')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    const total = await Product.countDocuments(filter);
-    
-    res.json({
+
+    // Filter by price range
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice) query.price.$gte = Number(minPrice);
+      if (maxPrice) query.price.$lte = Number(maxPrice);
+    }
+
+    // Search by name or description
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Execute query with pagination
+    const products = await Product.find(query)
+      .sort(sort)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .populate('category', 'name');
+
+    // Get total documents
+    const count = await Product.countDocuments(query);
+
+    res.status(200).json({
       products,
-      page,
-      pages: Math.ceil(total / limit),
-      total
+      totalPages: Math.ceil(count / limit),
+      currentPage: page,
+      totalProducts: count
     });
   } catch (error) {
-    console.error('Get products error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({
+      message: 'Error fetching products',
+      error: error.message
+    });
   }
 };
 
-// @desc    Get featured products
-// @route   GET /api/products/featured
-// @access  Public
-exports.getFeaturedProducts = async (req, res) => {
-  try {
-    const products = await Product.find({ featured: true, isActive: true })
-      .populate('category', 'name')
-      .limit(8);
-    
-    res.json(products);
-  } catch (error) {
-    console.error('Get featured products error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// @desc    Get a product by ID
-// @route   GET /api/products/:id
-// @access  Public
+// Get single product
 exports.getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
       .populate('category', 'name');
-    
+
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
-    
-    res.json(product);
+
+    res.status(200).json(product);
   } catch (error) {
-    console.error('Get product by ID error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({
+      message: 'Error fetching product',
+      error: error.message
+    });
   }
 };
 
-// @desc    Create a new product
-// @route   POST /api/products
-// @access  Public
+// Get products by category
+exports.getProductsByCategory = async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const { page = 1, limit = 10, sort = '-createdAt' } = req.query;
+
+    // Validate category exists
+    const categoryExists = await Category.findById(categoryId);
+    if (!categoryExists) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+
+    // Find products in category
+    const products = await Product.find({ category: categoryId })
+      .sort(sort)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .populate('category', 'name');
+
+    // Get total documents
+    const count = await Product.countDocuments({ category: categoryId });
+
+    res.status(200).json({
+      products,
+      totalPages: Math.ceil(count / limit),
+      currentPage: page,
+      totalProducts: count
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Error fetching products by category',
+      error: error.message
+    });
+  }
+};
+
+// Create new product
 exports.createProduct = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    // Validate required fields
+    if (!req.body.name) {
+      return res.status(400).json({ message: 'Product name is required' });
+    }
+    if (!req.body.description) {
+      return res.status(400).json({ message: 'Product description is required' });
+    }
+    if (!req.body.price) {
+      return res.status(400).json({ message: 'Product price is required' });
+    }
+    if (!req.body.category) {
+      return res.status(400).json({ message: 'Product category is required' });
     }
     
-    const {
-      name,
-      description,
-      price,
-      discountPrice,
-      category,
-      stock,
-      featured,
-      tags
-    } = req.body;
-    
-    // Handle image uploads
-    const images = req.files ? req.files.map(file => file.path) : [];
-    
-    const product = await Product.create({
-      name,
-      description,
-      price,
-      discountPrice,
-      category,
-      images,
-      stock,
-      featured,
-      tags: tags ? tags.split(',').map(tag => tag.trim()) : []
+    // Validate category exists if provided
+    if (req.body.category) {
+      const categoryExists = await Category.findById(req.body.category);
+      if (!categoryExists) {
+        return res.status(400).json({ message: 'Category not found' });
+      }
+    }
+
+    // Prepare product data
+    const productData = {
+      name: req.body.name,
+      description: req.body.description,
+      price: parseFloat(req.body.price),
+      category: req.body.category,
+      stock: parseInt(req.body.stock) || 0,
+      featured: req.body.featured === 'true',
+      status: req.body.status || 'draft'
+    };
+
+    // Add sale price if provided
+    if (req.body.salePrice) {
+      productData.salePrice = parseFloat(req.body.salePrice);
+    }
+
+    // Add SKU if provided or generate one
+    productData.sku = req.body.sku || `SKU-${Date.now()}`;
+
+    // Add tags if provided
+    if (req.body.tags) {
+      try {
+        productData.tags = JSON.parse(req.body.tags);
+      } catch (e) {
+        // If parsing fails, try to split by comma
+        productData.tags = req.body.tags.split(',').map(tag => tag.trim());
+      }
+    }
+
+    // Add images if uploaded
+    if (req.files && req.files.productImages) {
+      if (Array.isArray(req.files.productImages)) {
+        productData.images = req.files.productImages.map(file => file.filename);
+      } else {
+        productData.images = [req.files.productImages.filename];
+      }
+    }
+
+    const product = await Product.create(productData);
+
+    res.status(201).json({
+      message: 'Product created successfully',
+      product
     });
-    
-    res.status(201).json(product);
   } catch (error) {
-    console.error('Create product error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Product creation error:', error);
+    res.status(400).json({
+      message: 'Error creating product',
+      error: error.message
+    });
   }
 };
 
-// @desc    Update a product
-// @route   PUT /api/products/:id
-// @access  Public
+// Update product
 exports.updateProduct = async (req, res) => {
   try {
+    // Validate required fields
+    if (!req.body.name) {
+      return res.status(400).json({ message: 'Product name is required' });
+    }
+    if (!req.body.description) {
+      return res.status(400).json({ message: 'Product description is required' });
+    }
+    if (!req.body.price) {
+      return res.status(400).json({ message: 'Product price is required' });
+    }
+    if (!req.body.category) {
+      return res.status(400).json({ message: 'Product category is required' });
+    }
+    
+    // Validate category exists if provided
+    if (req.body.category) {
+      const categoryExists = await Category.findById(req.body.category);
+      if (!categoryExists) {
+        return res.status(400).json({ message: 'Category not found' });
+      }
+    }
+
+    // Prepare update data
+    const updateData = {
+      name: req.body.name,
+      description: req.body.description,
+      price: parseFloat(req.body.price),
+      category: req.body.category,
+      stock: parseInt(req.body.stock) || 0,
+      featured: req.body.featured === 'true',
+      status: req.body.status || 'draft'
+    };
+
+    // Add sale price if provided or set to null
+    if (req.body.salePrice) {
+      updateData.salePrice = parseFloat(req.body.salePrice);
+    } else {
+      updateData.salePrice = null;
+    }
+
+    // Update SKU if provided
+    if (req.body.sku) {
+      updateData.sku = req.body.sku;
+    }
+
+    // Add tags if provided
+    if (req.body.tags) {
+      try {
+        updateData.tags = JSON.parse(req.body.tags);
+      } catch (e) {
+        // If parsing fails, try to split by comma
+        updateData.tags = req.body.tags.split(',').map(tag => tag.trim());
+      }
+    }
+
+    // Add new images if uploaded
+    if (req.files && req.files.length > 0) {
+      const product = await Product.findById(req.params.id);
+      if (!product) {
+        return res.status(404).json({ message: 'Product not found' });
+      }
+      
+      // Add new images to existing ones
+      updateData.images = [
+        ...(product.images || []),
+        ...req.files.map(file => file.filename)
+      ];
+    }
+
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    res.status(200).json({
+      message: 'Product updated successfully',
+      product
+    });
+  } catch (error) {
+    console.error('Product update error:', error);
+    res.status(400).json({
+      message: 'Error updating product',
+      error: error.message
+    });
+  }
+};
+
+// Delete product
+exports.deleteProduct = async (req, res) => {
+  try {
+    const product = await Product.findByIdAndDelete(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    res.status(200).json({
+      message: 'Product deleted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Error deleting product',
+      error: error.message
+    });
+  }
+};
+
+// Update product stock
+exports.updateProductStock = async (req, res) => {
+  try {
+    const { quantity } = req.body;
+    
+    if (quantity === undefined) {
+      return res.status(400).json({ message: 'Quantity is required' });
+    }
+    
     const product = await Product.findById(req.params.id);
     
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
     
-    const {
-      name,
-      description,
-      price,
-      discountPrice,
-      category,
-      stock,
-      featured,
-      tags,
-      isActive
-    } = req.body;
-    
-    // Update fields
-    if (name) product.name = name;
-    if (description) product.description = description;
-    if (price) product.price = price;
-    if (discountPrice !== undefined) product.discountPrice = discountPrice;
-    if (category) product.category = category;
-    if (stock !== undefined) product.stock = stock;
-    if (featured !== undefined) product.featured = featured;
-    if (tags) product.tags = tags.split(',').map(tag => tag.trim());
-    if (isActive !== undefined) product.isActive = isActive;
-    
-    // Handle image uploads
-    if (req.files && req.files.length > 0) {
-      product.images = req.files.map(file => file.path);
-    }
-    
+    product.stock = quantity;
     await product.save();
     
-    res.json(product);
+    res.status(200).json({
+      message: 'Product stock updated successfully',
+      product
+    });
   } catch (error) {
-    console.error('Update product error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({
+      message: 'Error updating product stock',
+      error: error.message
+    });
   }
 };
 
-// @desc    Delete a product
-// @route   DELETE /api/products/:id
-// @access  Public
-exports.deleteProduct = async (req, res) => {
+// Toggle product featured status
+exports.toggleProductFeatured = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     
@@ -179,13 +354,19 @@ exports.deleteProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' });
     }
     
-    // Soft delete by setting isActive to false
-    product.isActive = false;
+    product.featured = !product.featured;
     await product.save();
     
-    res.json({ message: 'Product removed' });
+    res.status(200).json({
+      message: `Product ${product.featured ? 'marked as featured' : 'removed from featured'} successfully`,
+      product
+    });
   } catch (error) {
-    console.error('Delete product error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(400).json({
+      message: 'Error toggling product featured status',
+      error: error.message
+    });
   }
 };
+
+

@@ -1,43 +1,26 @@
 const express = require('express');
 const router = express.Router();
-const { check } = require('express-validator');
 const orderController = require('../controllers/orderController');
 
-// @route   GET /api/orders
-// @desc    Get all orders
-// @access  Public
-router.get('/', orderController.getOrders);
+// GET all orders
+router.get('/', orderController.getAllOrders);
 
-// @route   GET /api/orders/status/:status
-// @desc    Get orders by status
-// @access  Public
-router.get('/status/:status', orderController.getOrdersByStatus);
-
-// @route   GET /api/orders/:id
-// @desc    Get an order by ID
-// @access  Public
+// GET single order by ID
 router.get('/:id', orderController.getOrderById);
 
-// @route   POST /api/orders
-// @desc    Create a new order
-// @access  Public
-router.post('/',
-  [
-    check('customerInfo', 'Customer information is required').notEmpty(),
-    check('items', 'Order items are required').isArray(),
-    check('shippingAddress', 'Shipping address is required').notEmpty()
-  ],
-  orderController.createOrder
-);
+// POST create new order
+router.post('/', orderController.createOrder);
 
-// @route   PUT /api/orders/:id/status
-// @desc    Update order status
-// @access  Public
-router.put('/:id/status', orderController.updateOrderStatus);
+// PUT update order
+router.put('/:id', orderController.updateOrder);
 
-// @route   DELETE /api/orders/:id
-// @desc    Delete an order
-// @access  Public
+// PATCH update order status
+router.patch('/:id/status', orderController.updateOrderStatus);
+
+// DELETE order
 router.delete('/:id', orderController.deleteOrder);
+
+// GET order statistics
+router.get('/stats/summary', orderController.getOrderStats);
 
 module.exports = router;
